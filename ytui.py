@@ -9,6 +9,7 @@ import json
 import os
 import re
 import signal
+import shutil
 import subprocess
 import sys
 import threading
@@ -399,7 +400,7 @@ class MainMenu(Screen):
 class URLInput(Screen):
     def __init__(self, app):
         super().__init__(app)
-        self.url = ""
+        self.url = app.start_url or ""
         self.msg = ""
 
     def render(self):
@@ -443,6 +444,17 @@ class URLInput(Screen):
             self.msg = ""
         elif key in (curses.KEY_RESIZE,):
             pass
+        elif key == 22:  # Ctrl+V
+            clipboard = shutil.which("termux-clipboard-get")
+            if clipboard:
+                try:
+                    paste = subprocess.check_output([clipboard], timeout=2).decode().strip()
+                    self.url += paste
+                    self.msg = ""
+                except Exception:
+                    self.msg = "Clipboard paste failed"
+            else:
+                self.msg = "Clipboard not available (install termux-api)"
         elif 32 <= key < 127:
             self.url += chr(key)
             self.msg = ""
@@ -585,6 +597,17 @@ class SearchInput(Screen):
         elif key == curses.KEY_BACKSPACE or key == 127:
             self.query = self.query[:-1]
             self.msg = ""
+        elif key == 22:  # Ctrl+V
+            clipboard = shutil.which("termux-clipboard-get")
+            if clipboard:
+                try:
+                    paste = subprocess.check_output([clipboard], timeout=2).decode().strip()
+                    self.query += paste
+                    self.msg = ""
+                except Exception:
+                    self.msg = "Clipboard paste failed"
+            else:
+                self.msg = "Clipboard not available (install termux-api)"
         elif 32 <= key < 127:
             self.query += chr(key)
             self.msg = ""
@@ -2425,6 +2448,67 @@ class SettingsView(Screen):
                 self.edit_mode = True
 
 
+class HelpScreen(Screen):
+    def render(self):
+        h, w = self.app.stdscr.getmaxyx()
+        self.app.stdscr.clear()
+        self.draw_title("Help — Keyboard Shortcuts")
+
+        sections = [
+            ("Navigation", [
+                ("\u2191 / \u2193", "Navigate up/down"),
+                ("Enter", "Confirm / Select"),
+                ("Esc", "Go back / Cancel"),
+                ("?", "Show this help"),
+            ]),
+            ("Download", [
+                ("d", "Download selected"),
+                ("m", "Toggle MP3 mode"),
+                ("Space", "Toggle selection"),
+                ("q", "Quit / Cancel"),
+            ]),
+            ("Editing", [
+                ("Backspace", "Delete character"),
+                ("Ctrl+U", "Clear input"),
+                ("Ctrl+V", "Paste from clipboard"),
+            ]),
+            ("General", [
+                ("t", "Toggle dark/light theme"),
+                ("a / n", "Select all / none"),
+            ]),
+        ]
+
+        col_width = max(w // 4, 18)
+        for col_idx, (title, items) in enumerate(sections):
+            x = 2 + col_idx * col_width
+            if x >= w - 10:
+                break
+            try:
+                self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+                self.app.stdscr.addstr(2, x, f" {title}")
+                self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+            except curses.error:
+                pass
+            for i, (key, desc) in enumerate(items):
+                row = 4 + i * 2
+                if row >= h - 2:
+                    break
+                try:
+                    self.app.stdscr.attron(curses.color_pair(COLOR_SEL) | curses.A_BOLD)
+                    self.app.stdscr.addstr(row, x, f" {key:<15}")
+                    self.app.stdscr.attroff(curses.color_pair(COLOR_SEL) | curses.A_BOLD)
+                    self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
+                    self.app.stdscr.addstr(row, x + 16, desc[:w - x - 20])
+                    self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
+                except curses.error:
+                    pass
+
+        self.draw_status("Press any key to close help")
+
+    def handle_key(self, key):
+        self.app.pop_screen()
+
+
 class App:
     def __init__(self, stdscr):
         self.stdscr = stdscr
@@ -2432,8 +2516,21 @@ class App:
         self.history = HistoryManager(self.config)
         self.screens = []
         self.running = True
+        self.start_url = None
         self._init_curses()
         self.push_screen(MainMenu(self))
+        self._detect_clipboard()
+
+    def _detect_clipboard(self):
+        clipboard = shutil.which("termux-clipboard-get")
+        if not clipboard:
+            return
+        try:
+            content = subprocess.check_output([clipboard], timeout=2).decode().strip()
+            if content and ("youtube.com" in content or "youtu.be" in content):
+                self.start_url = content
+        except Exception:
+            pass
 
     def _init_curses(self):
         curses.use_default_colors()
@@ -2486,7 +2583,9 @@ class App:
                 self.stdscr.refresh()
                 key = self.stdscr.getch()
                 if key != -1:  # -1 = timeout, tidak ada tombol ditekan
-                    if key == curses.KEY_MOUSE:
+                    if key == ord("?"):
+                        self.push_screen(HelpScreen(self))
+                    elif key == curses.KEY_MOUSE:
                         screen.handle_mouse()
                     else:
                         screen.handle_key(key)
