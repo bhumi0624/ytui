@@ -1372,24 +1372,27 @@ class FolderBrowser(Screen):
                         self.app, self.playlist_videos, self.fmt["id"], path,
                         playlist_title=self.playlist_title,
                         mp3_mode=self.mp3_mode,
-                        fmt_acodec=self.fmt.get("acodec", "")
+                        fmt_acodec=self.fmt.get("acodec", ""),
+                        subtitle_langs=self.subtitle_langs,
                     )
                 )
             else:
                 self.app.push_screen(
                     DownloadProgress(
-                        self.app, self.url, self.fmt, self.video_title, path
+                        self.app, self.url, self.fmt, self.video_title, path,
+                        subtitle_langs=self.subtitle_langs,
                     )
                 )
 
 
 class DownloadProgress(Screen):
-    def __init__(self, app, url, fmt, video_title, dest_dir):
+    def __init__(self, app, url, fmt, video_title, dest_dir, subtitle_langs=""):
         super().__init__(app)
         self.url = url
         self.fmt = fmt
         self.video_title = video_title
         self.dest_dir = dest_dir
+        self.subtitle_langs = subtitle_langs
         self.percent = 0
         self.speed = ""
         self.eta = ""
@@ -1421,6 +1424,9 @@ class DownloadProgress(Screen):
                     "-o", os.path.join(self.dest_dir, "%(title)s.%(ext)s"),
                     self.url,
                 ]
+                if self.subtitle_langs:
+                    cmd += ["--write-subs", "--sub-langs", self.subtitle_langs,
+                            "--sub-format", "srt", "--convert-subs", "srt"]
                 self.proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, bufsize=1,
@@ -2435,7 +2441,7 @@ class PlaylistSelector(Screen):
 class PlaylistProgress(Screen):
     """Download sequential playlist dengan progress per-video."""
     def __init__(self, app, videos, fmt_id, dest_dir, playlist_title="",
-                 mp3_mode=False, fmt_acodec=""):
+                 mp3_mode=False, fmt_acodec="", subtitle_langs=""):
         super().__init__(app)
         self.videos = videos
         self.fmt_id = fmt_id
@@ -2443,6 +2449,7 @@ class PlaylistProgress(Screen):
         self.fmt_acodec = fmt_acodec
         self.dest_dir = dest_dir
         self.playlist_title = playlist_title
+        self.subtitle_langs = subtitle_langs
         self.current = 0
         self.total = len(videos)
         self.results = []  # (ok/fail, title, error?)
@@ -2497,6 +2504,9 @@ class PlaylistProgress(Screen):
                         "-o", os.path.join(self.dest_dir, "%(title)s.%(ext)s"),
                         url,
                     ]
+                if self.subtitle_langs:
+                    cmd += ["--write-subs", "--sub-langs", self.subtitle_langs,
+                            "--sub-format", "srt", "--convert-subs", "srt"]
                 self.proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, bufsize=1,
