@@ -1193,6 +1193,7 @@ class FolderBrowser(Screen):
         self.playlist_videos = playlist_videos
         self.playlist_title = playlist_title
         self.mp3_mode = mp3_mode
+        self.subtitle_langs = subtitle_langs
         self.current_path = app.config["last_dir"]
         self.entries = []
         self.idx = 0
