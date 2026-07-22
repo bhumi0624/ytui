@@ -333,11 +333,13 @@ class Screen:
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
             except curses.error:
                 pass
+            y_top += 1
+            max_visible -= 1
         bottom_remain = total - offset - max_visible
         if bottom_remain > 0:
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-                self.app.stdscr.addstr(y_top + max_visible - 1, x, f"▼ {bottom_remain} more below")
+                self.app.stdscr.addstr(y_top + max_visible, x, f"▼ {bottom_remain} more below")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
             except curses.error:
                 pass
@@ -358,7 +360,7 @@ class Screen:
 
         self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
         put(box_y, "╔" + "═" * (box_w - 2) + "╗")
-        put(box_y + 1, f"║ {title:<{box_w-4}} ║")
+        put(box_y + 1, f"║ {title:^{box_w-4}} ║")
         self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
         put(box_y + 2, "╠" + "═" * (box_w - 2) + "╣")
 
@@ -858,10 +860,10 @@ class FormatSelector(Screen):
 
     def render(self):
         h, w = self.app.stdscr.getmaxyx()
+        self.app.stdscr.clear()
         if self.preset_mode:
             self._render_preset_overlay(h, w)
             return
-        self.app.stdscr.clear()
 
         if self.loading:
             self.app.stdscr.attron(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
@@ -1044,11 +1046,18 @@ class SubtitleSelector(Screen):
             is_manual = code in subs_manual
             self.items.append([code, SUB_LANG_NAMES[code], is_manual, is_manual])
         self.col_idx = 0  # 0=manual column, 1=auto column
-        self.item_idx = 0
+        self.active_pos = 0  # position within current column's items
 
     def _active_items(self):
         """Items in the current column."""
         return [it for it in self.items if self.col_idx == 0 and it[2] or self.col_idx == 1 and not it[2]]
+
+    def _active_item_idx(self):
+        """Global index in self.items of the current active position."""
+        active = self._active_items()
+        if active and self.active_pos < len(active):
+            return self.items.index(active[self.active_pos])
+        return 0
 
     def render(self):
         h, w = self.app.stdscr.getmaxyx()
@@ -1085,7 +1094,7 @@ class SubtitleSelector(Screen):
                 if row < len(items):
                     orig_idx = items[row][0]
                     code, name, is_manual, checked = items[row][1]
-                    is_sel = is_active and orig_idx == self.item_idx
+                    is_sel = is_active and orig_idx == self._active_item_idx()
                     cb = "[\u2713]" if checked else "[ ]"
                     dot = "\u25cf" if is_manual else "\u25cb"
                     line = f"\u2502 {cb} {name:<{col_w-16}}{code:>4} {dot} \u2502"
@@ -1134,27 +1143,24 @@ class SubtitleSelector(Screen):
             self._proceed(",".join(codes))
         elif key == 9:  # Tab
             self.col_idx = 1 - self.col_idx
-            self.item_idx = 0
+            self.active_pos = 0
         elif key == curses.KEY_LEFT and self.col_idx == 1:
             self.col_idx = 0
-            self.item_idx = 0
+            self.active_pos = 0
         elif key == curses.KEY_RIGHT and self.col_idx == 0:
             self.col_idx = 1
-            self.item_idx = 0
+            self.active_pos = 0
         elif key == curses.KEY_UP:
             active = self._active_items()
             if active:
-                cur = next((p for p, it in enumerate(active) if it == self.items[self.item_idx]), 0) if any(active) else 0
-                nxt = (cur - 1) % len(active) if active else 0
-                self.item_idx = self.items.index(active[nxt])
+                self.active_pos = (self.active_pos - 1) % len(active)
         elif key == curses.KEY_DOWN:
             active = self._active_items()
             if active:
-                cur = next((p for p, it in enumerate(active) if it == self.items[self.item_idx]), 0) if any(active) else 0
-                nxt = (cur + 1) % len(active) if active else 0
-                self.item_idx = self.items.index(active[nxt])
+                self.active_pos = (self.active_pos + 1) % len(active)
         elif key == ord(" "):
-            self.items[self.item_idx][3] = not self.items[self.item_idx][3]
+            idx = self._active_item_idx()
+            self.items[idx][3] = not self.items[idx][3]
         elif key in (ord("a"), ord("A")):
             for it in self._active_items():
                 it[3] = True
