@@ -323,6 +323,33 @@ class Screen:
             except curses.error:
                 pass
 
+    def draw_dialog(self, title, message, width=44):
+        h, w = self.app.stdscr.getmaxyx()
+        box_w = min(width, w - 4)
+        lines = message.split("\n")
+        box_h = 5 + len(lines)
+        box_x = w // 2 - box_w // 2
+        box_y = max(0, h // 2 - box_h // 2)
+
+        def put(y, s):
+            try:
+                self.app.stdscr.addstr(y, box_x, s[:box_w])
+            except curses.error:
+                pass
+
+        self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+        put(box_y, "╔" + "═" * (box_w - 2) + "╗")
+        put(box_y + 1, f"║ {title:<{box_w-4}} ║")
+        self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+        put(box_y + 2, "╠" + "═" * (box_w - 2) + "╣")
+
+        for i, line in enumerate(lines):
+            self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
+            put(box_y + 3 + i, f"║ {line:<{box_w-4}} ║")
+            self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
+
+        put(box_y + 3 + len(lines), "╚" + "═" * (box_w - 2) + "╝")
+
 
 class MainMenu(Screen):
     def __init__(self, app):
@@ -440,21 +467,22 @@ class URLInput(Screen):
         self.app.stdscr.clear()
         self.draw_title("Download URL")
 
+        if self.msg:
+            self.draw_dialog("Error", self.msg[:250])
+            self.draw_status("Press Esc to go back")
+            return
+
         lines = [
             "Paste or type a video/playlist URL below, then press Enter.",
             "",
             "URL: " + self.url + ("█" if len(self.url) < w - 10 else ""),
         ]
-        if self.msg:
-            lines.append("")
-            lines.append(self.msg)
 
         for i, line in enumerate(lines):
             try:
-                attr = curses.color_pair(COLOR_ERROR) if self.msg and i == len(lines) - 1 else curses.color_pair(COLOR_MENU)
-                self.app.stdscr.attron(attr)
+                self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
                 self.app.stdscr.addstr(h // 2 - 2 + i, 4, line[: w - 8])
-                self.app.stdscr.attroff(attr)
+                self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
             except curses.error:
                 pass
 
@@ -595,12 +623,9 @@ class SearchInput(Screen):
             pass
 
         if self.error:
-            try:
-                self.app.stdscr.attron(curses.color_pair(COLOR_ERROR))
-                self.app.stdscr.addstr(h - 4, 2, f" {self.error[:w-4]}")
-                self.app.stdscr.attroff(curses.color_pair(COLOR_ERROR))
-            except curses.error:
-                pass
+            self.draw_dialog("Error", self.error[:250])
+            self.draw_status("Press Esc to go back")
+            return
 
         self.draw_status("↑/↓ navigate  Enter select  Esc back  n new search")
 
@@ -819,15 +844,8 @@ class FormatSelector(Screen):
             return
 
         if self.error:
-            self.app.stdscr.attron(curses.color_pair(COLOR_ERROR) | curses.A_BOLD)
-            for i, line in enumerate(self.error.split("\n")[:5]):
-                self.app.stdscr.addstr(h // 2 - 2 + i, 4, line[: w - 8])
-            self.app.stdscr.attroff(curses.color_pair(COLOR_ERROR) | curses.A_BOLD)
-            try:
-                self.app.stdscr.addstr(h // 2 + 3, 4, "Press Esc to go back")
-            except curses.error:
-                pass
-            self.draw_status("Error fetching formats")
+            self.draw_dialog("Error", self.error[:250])
+            self.draw_status("Press Esc to go back")
             return
 
         info = self.video_info
@@ -1227,13 +1245,8 @@ class DownloadProgress(Screen):
         bar_w = min(50, w - 10)
 
         if self.status == "error":
-            try:
-                self.app.stdscr.attron(curses.color_pair(COLOR_ERROR) | curses.A_BOLD)
-                self.app.stdscr.addstr(y, 2, f" ERROR: {self.error[:w-10]}")
-                self.app.stdscr.attroff(curses.color_pair(COLOR_ERROR) | curses.A_BOLD)
-            except curses.error:
-                pass
-            self.draw_status("Esc to go back")
+            self.draw_dialog("Error", self.error[:250])
+            self.draw_status("Press Esc to go back")
             return
 
         if self.status == "starting":
@@ -1693,6 +1706,7 @@ class BatchProgress(Screen):
         self.current = 0
         self.total = len(urls)
         self.results = []
+        self.error = ""
         self.running = True
         self._start()
 
@@ -1726,6 +1740,11 @@ class BatchProgress(Screen):
         h, w = self.app.stdscr.getmaxyx()
         self.app.stdscr.clear()
         self.draw_title("Batch Download Progress")
+
+        if self.error:
+            self.draw_dialog("Error", self.error[:250])
+            self.draw_status("Press Esc to go back")
+            return
 
         try:
             self.app.stdscr.addstr(3, 2, f" Progress: {self.current}/{self.total}")
@@ -1859,14 +1878,8 @@ class PlaylistDetect(Screen):
             self.draw_status("Please wait...  Esc cancel")
             return
         if self.error:
-            try:
-                self.app.stdscr.attron(curses.color_pair(COLOR_ERROR) | curses.A_BOLD)
-                self.app.stdscr.addstr(h // 2 - 1, 4, f" Error: {self.error[:w-10]}")
-                self.app.stdscr.attroff(curses.color_pair(COLOR_ERROR) | curses.A_BOLD)
-                self.app.stdscr.addstr(h // 2 + 1, 4, " Press Esc to go back")
-            except curses.error:
-                pass
-            self.draw_status("Esc back")
+            self.draw_dialog("Error", self.error[:250])
+            self.draw_status("Press Esc to go back")
             return
         # Redirect on next frame
         if not self.redirected:
