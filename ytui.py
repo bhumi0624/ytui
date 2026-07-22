@@ -51,12 +51,12 @@ THEME_DARK = {
 
 THEME_LIGHT = {
     "menu":      (curses.COLOR_BLACK, -1),
-    "title":     (curses.COLOR_BLUE, -1),
-    "sel":       (curses.COLOR_WHITE, curses.COLOR_BLUE),
+    "title":     (curses.COLOR_BLACK, -1),
+    "sel":       (-1, -1),
     "status":    (curses.COLOR_WHITE, curses.COLOR_BLUE),
     "progress":  (curses.COLOR_GREEN, -1),
-    "header":    (curses.COLOR_BLUE, -1),
-    "info":      (curses.COLOR_MAGENTA, -1),
+    "header":    (-1, -1),
+    "info":      (-1, -1),
     "error":     (curses.COLOR_RED, -1),
 }
 
@@ -258,35 +258,6 @@ class Screen:
         """Handle mouse click. Override in subclass if needed."""
         pass
 
-    def draw_button(self, y, x, text, width=20, selected=False, active=False):
-        """Draw a clickable button with box-drawing characters.
-        Returns (y, x, width, height=3) for hit-testing.
-        """
-        h, w = self.app.stdscr.getmaxyx()
-        if y < 0 or y + 2 >= h or x < 0 or x + width >= w:
-            return (y, x, width, 3)  # skip rendering if offscreen
-        attr_btn = curses.color_pair(COLOR_SEL) | (curses.A_REVERSE if selected else 0)
-        attr_frame = curses.color_pair(COLOR_MENU)
-        if active:
-            attr_btn |= curses.A_BOLD
-        try:
-            # Top border
-            self.app.stdscr.attron(attr_frame)
-            self.app.stdscr.addstr(y, x, "┌" + "─" * (width - 2) + "┐")
-            self.app.stdscr.attroff(attr_frame)
-            # Text line
-            padded = f" {text:^{width-4}} "
-            self.app.stdscr.attron(attr_btn)
-            self.app.stdscr.addstr(y + 1, x, "│" + padded[:width - 2] + "│")
-            self.app.stdscr.attroff(attr_btn)
-            # Bottom border
-            self.app.stdscr.attron(attr_frame)
-            self.app.stdscr.addstr(y + 2, x, "└" + "─" * (width - 2) + "┘")
-            self.app.stdscr.attroff(attr_frame)
-        except curses.error:
-            pass
-        return (y, x, width, 3)
-
     def draw_status(self, text="", color=COLOR_STATUS):
         h, w = self.app.stdscr.getmaxyx()
         sep_y = h - 3
@@ -305,14 +276,14 @@ class Screen:
 
     def draw_title(self, text):
         h, w = self.app.stdscr.getmaxyx()
-        title = f" ytui v1.0: {text} "
+        title = f" \u2500\u2500 ytui v1.0: {text} "
         pad = w - len(title) - 2
         if pad < 0:
             title = title[:w - 4]
             pad = 0
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-            self.app.stdscr.addstr(0, 0, f"┌{title}{'─' * pad}┐")
+            self.app.stdscr.addstr(0, 0, f"{title}{'\u2500' * pad}")
             self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
         except curses.error:
             pass
@@ -344,32 +315,24 @@ class Screen:
             except curses.error:
                 pass
 
-    def draw_dialog(self, title, message, width=44):
+    def draw_dialog(self, title, message):
         h, w = self.app.stdscr.getmaxyx()
-        box_w = min(width, w - 4)
         lines = message.split("\n")
-        box_h = 5 + len(lines)
-        box_x = w // 2 - box_w // 2
-        box_y = max(0, h // 2 - box_h // 2)
-
-        def put(y, s):
+        title_str = f"  \u2500\u2500 {title} \u2500\u2500"
+        start_y = h // 2 - len(lines) // 2 - 1
+        try:
+            self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+            self.app.stdscr.addstr(start_y, w // 2 - len(title_str) // 2, title_str[:w-2])
+            self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+        except curses.error:
+            pass
+        for i, line in enumerate(lines):
             try:
-                self.app.stdscr.addstr(y, box_x, s[:box_w])
+                self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
+                self.app.stdscr.addstr(start_y + 1 + i, 4, line[:w-8])
+                self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
             except curses.error:
                 pass
-
-        self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-        put(box_y, "╔" + "═" * (box_w - 2) + "╗")
-        put(box_y + 1, f"║ {title:^{box_w-4}} ║")
-        self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-        put(box_y + 2, "╠" + "═" * (box_w - 2) + "╣")
-
-        for i, line in enumerate(lines):
-            self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
-            put(box_y + 3 + i, f"║ {line:<{box_w-4}} ║")
-            self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
-
-        put(box_y + 3 + len(lines), "╚" + "═" * (box_w - 2) + "╝")
 
 
 class MainMenu(Screen):
@@ -384,76 +347,51 @@ class MainMenu(Screen):
             ("Exit", "exit"),
         ]
         self.idx = 0
-        self._theme_btn = None  # (y, x, w, h) for mouse hit-test
 
     def render(self):
         h, w = self.app.stdscr.getmaxyx()
         self.app.stdscr.clear()
 
-        box_w = 38
-        box_x = max(0, w // 2 - box_w // 2)
-        box_y = max(0, h // 2 - 6)
+        def cx(text):
+            return w // 2 - len(text) // 2
 
-        def put(y, s):
-            try:
-                self.app.stdscr.addstr(y, box_x, s[:box_w])
-            except curses.error:
-                pass
-
-        # Top
-        self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-        put(box_y, "╔" + "═" * (box_w - 2) + "╗")
-        put(box_y + 1, f"║{'ytui v1.0':^{box_w-2}}║")
-        put(box_y + 2, f"║{'yt-dlp Terminal UI':^{box_w-2}}║")
-        self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-        put(box_y + 3, "╠" + "═" * (box_w - 2) + "╣")
-
-        # Menu items
-        for i, (label, _) in enumerate(self.items):
-            y = box_y + 4 + i
-            prefix = "▶" if i == self.idx else " "
-            attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if i == self.idx else curses.color_pair(COLOR_MENU)
-            self.app.stdscr.attron(attr)
-            put(y, f"║ {prefix} {label:<29} ║")
-            self.app.stdscr.attroff(attr)
-
-        # Separator before theme
-        item_end = box_y + 4 + len(self.items)
-        put(item_end, "╠" + "═" * (box_w - 2) + "╣")
-
-        # Theme inline
-        theme = self.app.config["theme"]
-        dot = "●" if theme == "dark" else "○"
-        btn_y = item_end + 1
-        self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
-        put(btn_y, f"║   {dot} Theme: {theme.capitalize():<22} ║")
-        self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
-        self._theme_btn = (btn_y, box_x, box_w, 1)
-
-        # Bottom
-        put(btn_y + 1, "╚" + "═" * (box_w - 2) + "╝")
-
-        self.draw_status("↑/↓ navigate  Enter select  q quit  Ctrl+T toggle theme")
-
-    def _handle_mouse_click(self):
-        """Check if mouse click hit the theme button."""
         try:
-            _, mx, my, _, bstate = curses.getmouse()
-            if bstate & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):
-                if self._theme_btn:
-                    btn_y, btn_x, btn_w, btn_h = self._theme_btn
-                    if btn_y <= my <= btn_y + btn_h - 1 and btn_x <= mx <= btn_x + btn_w:
-                        self.app.toggle_theme()
+            self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+            self.app.stdscr.addstr(4, cx("\u2500\u2500 ytui v1.0 \u2500\u2500"),
+                                   "\u2500\u2500 ytui v1.0 \u2500\u2500"[:w-2])
+            self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+            self.app.stdscr.attron(curses.color_pair(COLOR_TITLE))
+            self.app.stdscr.addstr(5, cx("yt-dlp Terminal UI"), "yt-dlp Terminal UI"[:w-2])
+            self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE))
         except curses.error:
             pass
 
-    def handle_mouse(self):
-        self._handle_mouse_click()
+        for i, (label, _) in enumerate(self.items):
+            y = 7 + i
+            prefix = "\u25b6" if i == self.idx else " "
+            item_str = f"  {prefix} {label}"
+            attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if i == self.idx else curses.color_pair(COLOR_MENU)
+            try:
+                self.app.stdscr.attron(attr)
+                self.app.stdscr.addstr(y, 4, item_str[:w-8])
+                self.app.stdscr.attroff(attr)
+            except curses.error:
+                pass
+
+        theme = self.app.config["theme"]
+        dot = "\u25cf" if theme == "dark" else "\u25cb"
+        theme_str = f"  {dot} Theme: {theme.capitalize()}"
+        try:
+            self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
+            self.app.stdscr.addstr(7 + len(self.items) + 1, 4, theme_str[:w-8])
+            self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
+        except curses.error:
+            pass
+
+        self.draw_status("\u2191/\u2193 navigate  Enter select  q quit  t toggle theme")
 
     def handle_key(self, key):
-        if key == curses.KEY_MOUSE:
-            self._handle_mouse_click()
-        elif key == 20:  # Ctrl+T — toggle theme
+        if key == ord("t"):
             self.app.toggle_theme()
         elif key in (ord("q"), 27):
             self.app.running = False
@@ -933,36 +871,25 @@ class FormatSelector(Screen):
         self.draw_status(f"p presets  {footer}  ↑/↓  d download  r refresh  Esc back")
 
     def _render_preset_overlay(self, h, w):
-        self.draw_title("Quick Format Presets")
-        box_w = 42
-        box_x = max(0, w // 2 - box_w // 2)
-        box_y = max(0, h // 2 - len(FORMAT_PRESETS))
+        title = "\u2500\u2500 Quality Preset \u2500\u2500"
+        try:
+            self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+            self.app.stdscr.addstr(4, w // 2 - len(title) // 2, title[:w-2])
+            self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+        except curses.error:
+            pass
 
-        def put(y, s):
-            try:
-                self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-                self.app.stdscr.addstr(y, box_x, s[:box_w])
-                self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-            except curses.error:
-                pass
-
-        put(box_y, "╔" + "═" * (box_w - 2) + "╗")
-        put(box_y + 1, f"║ {'Quality Preset':^{box_w-6}} ║")
-        put(box_y + 2, "╠" + "═" * (box_w - 2) + "╣")
-
-        for i, (name, fmt_str) in enumerate(FORMAT_PRESETS):
-            y = box_y + 3 + i
+        for i, (name, _) in enumerate(FORMAT_PRESETS):
+            y = 6 + i
             prefix = "\u25b6 " if i == self.preset_idx else "  "
+            item_str = f"  {prefix}{name}"
             attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if i == self.preset_idx else curses.color_pair(COLOR_MENU)
             try:
                 self.app.stdscr.attron(attr)
-                self.app.stdscr.addstr(y, box_x, f"║ {prefix}{name:<{box_w-7}} ║")
+                self.app.stdscr.addstr(y, 8, item_str[:w-16])
                 self.app.stdscr.attroff(attr)
             except curses.error:
                 pass
-
-        bottom_y = box_y + 3 + len(FORMAT_PRESETS)
-        put(bottom_y, "╚" + "═" * (box_w - 2) + "╝")
 
         self.draw_status("\u2191/\u2193 navigate  Enter select  Esc back")
 
@@ -1075,12 +1002,12 @@ class SubtitleSelector(Screen):
             self.draw_status("Enter to continue  Esc skip")
             return
 
-        col_w = (w // 2) - 5
+        col_w = (w // 2) - 3
         max_rows = h - 7
 
         def draw_column(x, title, items, is_active):
             col_color = COLOR_TITLE if is_active else COLOR_MENU
-            header = f"\u250c\u2500 {title} ({len(items)}) " + "\u2500" * col_w + "\u2510"
+            header = f"  {title} ({len(items)})"
             try:
                 self.app.stdscr.attron(curses.color_pair(col_color) | curses.A_BOLD)
                 self.app.stdscr.addstr(3, x, header[:col_w + 2])
@@ -1095,35 +1022,16 @@ class SubtitleSelector(Screen):
                     orig_idx = items[row][0]
                     code, name, is_manual, checked = items[row][1]
                     is_sel = is_active and orig_idx == self._active_item_idx()
-                    cb = "[\u2713]" if checked else "[ ]"
+                    cb = "\u2713" if checked else " "
                     dot = "\u25cf" if is_manual else "\u25cb"
-                    line = f"\u2502 {cb} {name:<{col_w-16}}{code:>4} {dot} \u2502"
+                    line = f"  [{cb}] {name:<{col_w-14}}{code:>4} {dot}"
                     attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if is_sel else curses.color_pair(COLOR_MENU)
                     try:
                         self.app.stdscr.attron(attr)
                         self.app.stdscr.addstr(y, x, line[:col_w + 2])
                         self.app.stdscr.attroff(attr)
-                        if checked:
-                            self.app.stdscr.attron(curses.color_pair(COLOR_PROGRESS))
-                            self.app.stdscr.addstr(y, x + 2, "\u2713")
-                            self.app.stdscr.attroff(curses.color_pair(COLOR_PROGRESS))
                     except curses.error:
                         pass
-                else:
-                    try:
-                        self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
-                        self.app.stdscr.addstr(y, x, f"\u2502{' ' * col_w}\u2502"[:col_w + 2])
-                        self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
-                    except curses.error:
-                        pass
-
-            bottom_y = 4 + max(0, min(max_rows, len(items)))
-            try:
-                self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
-                self.app.stdscr.addstr(bottom_y, x, f"\u2514{'\u2500' * col_w}\u2518"[:col_w + 2])
-                self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
-            except curses.error:
-                pass
 
         man_items = [(i, it) for i, it in enumerate(self.items) if it[2]]
         auto_items = [(i, it) for i, it in enumerate(self.items) if not it[2]]
@@ -1428,12 +1336,16 @@ class DownloadProgress(Screen):
                     "-f", fmt_id,
                     "--newline",
                     "--progress-template", tmpl,
+                    "--merge-output-format", "mp4",
                     "-o", os.path.join(self.dest_dir, "%(title)s.%(ext)s"),
                     self.url,
                 ]
                 if self.subtitle_langs:
-                    cmd += ["--write-subs", "--sub-langs", self.subtitle_langs,
-                            "--sub-format", "srt", "--convert-subs", "srt"]
+                    cmd += ["--write-subs", "--write-auto-subs",
+                            "--sub-langs", self.subtitle_langs,
+                            "--sub-format", "srt/vtt/best"]
+                    if shutil.which("ffmpeg"):
+                        cmd += ["--convert-subs", "srt"]
                 self.proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, bufsize=1,
@@ -1461,6 +1373,8 @@ class DownloadProgress(Screen):
                     elif "has already been" in line and "download" in line:
                         self.status = "done"
                         self.percent = "100"
+                    elif "ERROR:" in line and "subtitle" in line.lower():
+                        continue
                     elif "ERROR:" in line:
                         self.error = line
                         self.status = "error"
@@ -1521,7 +1435,7 @@ class DownloadProgress(Screen):
                 self.app.stdscr.addstr(y + 2, 2, f" Saved to: {self.dest_dir}")
             except curses.error:
                 pass
-            self.app.stdscr.addstr(h - 4, 2, " Esc to go back")
+            self.draw_status("N new download  H home  Q quit  Esc back")
             return
 
         # 1. Fragment-based (HLS priority)
@@ -1602,11 +1516,24 @@ class DownloadProgress(Screen):
         self.draw_status("q cancel download  Esc back when done")
 
     def handle_key(self, key):
+        if self.status == "done":
+            if key in (ord("n"), ord("N")):
+                while len(self.app.screens) > 1:
+                    self.app.screens.pop()
+                self.app.push_screen(URLInput(self.app))
+            elif key in (ord("h"), ord("H")):
+                while len(self.app.screens) > 1:
+                    self.app.screens.pop()
+            elif key in (ord("q"), ord("Q")):
+                self.app.running = False
+            elif key == 27:
+                self.app.pop_screen()
+            return
         if key in (ord("q"), ord("Q")) and self.proc and self.proc.poll() is None:
             self.proc.send_signal(signal.SIGINT)
             self.status = "cancelled"
         elif key == 27:
-            if self.status in ("done", "error", "cancelled"):
+            if self.status in ("error", "cancelled"):
                 self.app.pop_screen()
 
 
@@ -2508,12 +2435,16 @@ class PlaylistProgress(Screen):
                         "-f", fmt_id,
                         "--newline",
                         "--progress-template", tmpl,
+                        "--merge-output-format", "mp4",
                         "-o", os.path.join(self.dest_dir, "%(title)s.%(ext)s"),
                         url,
                     ]
                 if self.subtitle_langs:
-                    cmd += ["--write-subs", "--sub-langs", self.subtitle_langs,
-                            "--sub-format", "srt", "--convert-subs", "srt"]
+                    cmd += ["--write-subs", "--write-auto-subs",
+                            "--sub-langs", self.subtitle_langs,
+                            "--sub-format", "srt/vtt/best"]
+                    if shutil.which("ffmpeg"):
+                        cmd += ["--convert-subs", "srt"]
                 self.proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                     text=True, bufsize=1,
@@ -2555,6 +2486,8 @@ class PlaylistProgress(Screen):
                             self.current_status = "downloading"
                     elif "[Merger]" in line:
                         self.current_status = "merging"
+                    elif "ERROR:" in line and "subtitle" in line.lower():
+                        continue
                     elif "ERROR:" in line:
                         self.current_status = "error"
                 ret = self.proc.wait()
