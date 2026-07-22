@@ -72,6 +72,15 @@ FORMAT_PRESETS = [
     ("Audio Only", "bestaudio/best"),
 ]
 
+SUB_LANG_NAMES = {
+    "en": "English", "id": "Indonesian", "ja": "Japanese",
+    "ko": "Korean", "zh": "Chinese", "hi": "Hindi",
+    "ar": "Arabic", "pt": "Portuguese", "es": "Spanish",
+    "fr": "French", "de": "German", "ru": "Russian",
+    "it": "Italian", "nl": "Dutch", "vi": "Vietnamese",
+    "th": "Thai",
+}
+
 COLOR_NAMES = {
     1: "menu", 2: "title", 3: "sel", 4: "status",
     5: "progress", 6: "header", 7: "info", 8: "error",
@@ -769,6 +778,8 @@ class FormatSelector(Screen):
         self.offset = 0
         self.preset_mode = False
         self.preset_idx = 0
+        self.subs_manual = []
+        self.subs_auto = []
         self.loading = True
         self.error = ""
         self._fetch()
@@ -832,6 +843,8 @@ class FormatSelector(Screen):
                     "playlist_count": data.get("playlist_count"),
                     "playlist": data.get("playlist"),
                 }
+                self.subs_manual = list(data.get("subtitles", {}).keys())
+                self.subs_auto = list(data.get("automatic_captions", {}).keys())
             except subprocess.TimeoutExpired:
                 self.error = "yt-dlp timed out after 30s"
             except json.JSONDecodeError:
@@ -995,13 +1008,13 @@ class FormatSelector(Screen):
             self.idx = min(len(self.formats) - 1, self.idx + 1)
         elif key in (curses.KEY_ENTER, 10, 13, ord("d"), ord("D")):
             fmt = self.formats[self.idx]
-            pl_name = self.playlist_title if self.playlist_videos else None
             self.app.push_screen(
-                FolderBrowser(self.app, self.url, fmt, self.video_info.get("title", ""),
-                              playlist_name=pl_name,
-                              playlist_videos=self.playlist_videos,
-                              playlist_title=self.playlist_title,
-                              mp3_mode=False)
+                SubtitleSelector(self.app, self.url, fmt,
+                                 self.video_info.get("title", ""),
+                                 self.playlist_title,
+                                 self.playlist_videos,
+                                 self.subs_manual,
+                                 self.subs_auto)
             )
         elif key == ord("p"):
             self.preset_mode = True
@@ -1014,9 +1027,158 @@ class FormatSelector(Screen):
             self._fetch()
 
 
+class SubtitleSelector(Screen):
+    def __init__(self, app, url, fmt, video_title, playlist_title,
+                 playlist_videos, subs_manual, subs_auto):
+        super().__init__(app)
+        self.url = url
+        self.fmt = fmt
+        self.video_title = video_title
+        self.playlist_title = playlist_title
+        self.playlist_videos = playlist_videos
+        self.items = []  # [code, name, is_manual, is_checked]
+        all_codes = set(subs_manual) | set(subs_auto)
+        for code in sorted(all_codes):
+            if code not in SUB_LANG_NAMES:
+                continue
+            is_manual = code in subs_manual
+            self.items.append([code, SUB_LANG_NAMES[code], is_manual, is_manual])
+        self.col_idx = 0  # 0=manual column, 1=auto column
+        self.item_idx = 0
+
+    def _active_items(self):
+        """Items in the current column."""
+        return [it for it in self.items if self.col_idx == 0 and it[2] or self.col_idx == 1 and not it[2]]
+
+    def render(self):
+        h, w = self.app.stdscr.getmaxyx()
+        self.app.stdscr.clear()
+        self.draw_title("Subtitle Options")
+
+        if not self.items:
+            try:
+                self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
+                msg = " No subtitles available for this video "
+                self.app.stdscr.addstr(h // 2, w // 2 - len(msg) // 2, msg)
+                self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
+            except curses.error:
+                pass
+            self.draw_status("Enter to continue  Esc skip")
+            return
+
+        col_w = (w // 2) - 5
+        max_rows = h - 7
+
+        def draw_column(x, title, items, is_active):
+            col_color = COLOR_TITLE if is_active else COLOR_MENU
+            header = f"\u250c\u2500 {title} ({len(items)}) " + "\u2500" * col_w + "\u2510"
+            try:
+                self.app.stdscr.attron(curses.color_pair(col_color) | curses.A_BOLD)
+                self.app.stdscr.addstr(3, x, header[:col_w + 2])
+                self.app.stdscr.attroff(curses.color_pair(col_color) | curses.A_BOLD)
+            except curses.error:
+                pass
+
+            active_items = self._active_items()
+            for row in range(max_rows):
+                y = 4 + row
+                if row < len(items):
+                    orig_idx = items[row][0]
+                    code, name, is_manual, checked = items[row][1]
+                    is_sel = is_active and orig_idx == self.item_idx
+                    cb = "[\u2713]" if checked else "[ ]"
+                    dot = "\u25cf" if is_manual else "\u25cb"
+                    line = f"\u2502 {cb} {name:<{col_w-16}}{code:>4} {dot} \u2502"
+                    attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if is_sel else curses.color_pair(COLOR_MENU)
+                    try:
+                        self.app.stdscr.attron(attr)
+                        self.app.stdscr.addstr(y, x, line[:col_w + 2])
+                        self.app.stdscr.attroff(attr)
+                        if checked:
+                            self.app.stdscr.attron(curses.color_pair(COLOR_PROGRESS))
+                            self.app.stdscr.addstr(y, x + 2, "\u2713")
+                            self.app.stdscr.attroff(curses.color_pair(COLOR_PROGRESS))
+                    except curses.error:
+                        pass
+                else:
+                    try:
+                        self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
+                        self.app.stdscr.addstr(y, x, f"\u2502{' ' * col_w}\u2502"[:col_w + 2])
+                        self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
+                    except curses.error:
+                        pass
+
+            bottom_y = 4 + max(0, min(max_rows, len(items)))
+            try:
+                self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
+                self.app.stdscr.addstr(bottom_y, x, f"\u2514{'\u2500' * col_w}\u2518"[:col_w + 2])
+                self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
+            except curses.error:
+                pass
+
+        man_items = [(i, it) for i, it in enumerate(self.items) if it[2]]
+        auto_items = [(i, it) for i, it in enumerate(self.items) if not it[2]]
+
+        draw_column(2, "Manual Subtitles", man_items, self.col_idx == 0)
+        auto_x = w // 2 + 1
+        draw_column(auto_x, "Auto-generated", auto_items, self.col_idx == 1)
+
+        n_checked = sum(1 for it in self.items if it[3])
+        self.draw_status(f"Space toggle  Tab switch  Enter confirm  Esc skip  a all  n none  | {n_checked} selected")
+
+    def handle_key(self, key):
+        if key == 27:  # Esc — skip
+            self._proceed("")
+        elif key in (curses.KEY_ENTER, 10, 13):  # Enter — confirm
+            codes = [it[0] for it in self.items if it[3]]
+            self._proceed(",".join(codes))
+        elif key == 9:  # Tab
+            self.col_idx = 1 - self.col_idx
+            self.item_idx = 0
+        elif key == curses.KEY_LEFT and self.col_idx == 1:
+            self.col_idx = 0
+            self.item_idx = 0
+        elif key == curses.KEY_RIGHT and self.col_idx == 0:
+            self.col_idx = 1
+            self.item_idx = 0
+        elif key == curses.KEY_UP:
+            active = self._active_items()
+            if active:
+                cur = next((p for p, it in enumerate(active) if it == self.items[self.item_idx]), 0) if any(active) else 0
+                nxt = (cur - 1) % len(active) if active else 0
+                self.item_idx = self.items.index(active[nxt])
+        elif key == curses.KEY_DOWN:
+            active = self._active_items()
+            if active:
+                cur = next((p for p, it in enumerate(active) if it == self.items[self.item_idx]), 0) if any(active) else 0
+                nxt = (cur + 1) % len(active) if active else 0
+                self.item_idx = self.items.index(active[nxt])
+        elif key == ord(" "):
+            self.items[self.item_idx][3] = not self.items[self.item_idx][3]
+        elif key in (ord("a"), ord("A")):
+            for it in self._active_items():
+                it[3] = True
+        elif key in (ord("n"), ord("N")):
+            for it in self._active_items():
+                it[3] = False
+
+    def _proceed(self, subtitle_langs):
+        pl_name = self.playlist_title if self.playlist_videos else None
+        self.app.push_screen(
+            FolderBrowser(self.app, self.url, self.fmt,
+                          self.video_title,
+                          playlist_name=pl_name,
+                          playlist_videos=self.playlist_videos,
+                          playlist_title=self.playlist_title,
+                          mp3_mode=False,
+                          subtitle_langs=subtitle_langs)
+        )
+
+
 class FolderBrowser(Screen):
     def __init__(self, app, url, fmt, video_title, playlist_name=None,
-                 playlist_videos=None, playlist_title="", mp3_mode=False):
+                 playlist_videos=None, playlist_title="", mp3_mode=False,
+                 subtitle_langs=""):
         super().__init__(app)
         self.url = url
         self.fmt = fmt
