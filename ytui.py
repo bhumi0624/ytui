@@ -62,6 +62,16 @@ THEME_LIGHT = {
 
 THEMES = {"dark": THEME_DARK, "light": THEME_LIGHT}
 
+# ── Format Presets ──────────────────────────────────────────
+FORMAT_PRESETS = [
+    ("360p",      "bv*[height<=360]+ba/b[height<=360]/best"),
+    ("480p",      "bv*[height<=480]+ba/b[height<=480]/best"),
+    ("720p",      "bv*[height<=720]+ba/b[height<=720]/best"),
+    ("1080p",     "bv*[height<=1080]+ba/b[height<=1080]/best"),
+    ("4K",        "bv*[height<=2160]+ba/b[height<=2160]/best"),
+    ("Audio Only", "bestaudio/best"),
+]
+
 COLOR_NAMES = {
     1: "menu", 2: "title", 3: "sel", 4: "status",
     5: "progress", 6: "header", 7: "info", 8: "error",
@@ -757,6 +767,8 @@ class FormatSelector(Screen):
         self.video_info = {}
         self.idx = 0
         self.offset = 0
+        self.preset_mode = False
+        self.preset_idx = 0
         self.loading = True
         self.error = ""
         self._fetch()
@@ -833,6 +845,9 @@ class FormatSelector(Screen):
 
     def render(self):
         h, w = self.app.stdscr.getmaxyx()
+        if self.preset_mode:
+            self._render_preset_overlay(h, w)
+            return
         self.app.stdscr.clear()
 
         if self.loading:
@@ -900,7 +915,41 @@ class FormatSelector(Screen):
 
         self.draw_scroll_indicators(self.offset, max_visible, len(self.formats), 4)
         footer = f"Showing {len(self.formats)} formats"
-        self.draw_status(f"{footer}  ↑/↓ navigate  d download  Esc back")
+        self.draw_status(f"p presets  {footer}  ↑/↓  d download  r refresh  Esc back")
+
+    def _render_preset_overlay(self, h, w):
+        self.draw_title("Quick Format Presets")
+        box_w = 42
+        box_x = max(0, w // 2 - box_w // 2)
+        box_y = max(0, h // 2 - len(FORMAT_PRESETS))
+
+        def put(y, s):
+            try:
+                self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+                self.app.stdscr.addstr(y, box_x, s[:box_w])
+                self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+            except curses.error:
+                pass
+
+        put(box_y, "╔" + "═" * (box_w - 2) + "╗")
+        put(box_y + 1, f"║ {'Quality Preset':^{box_w-6}} ║")
+        put(box_y + 2, "╠" + "═" * (box_w - 2) + "╣")
+
+        for i, (name, fmt_str) in enumerate(FORMAT_PRESETS):
+            y = box_y + 3 + i
+            prefix = "\u25b6 " if i == self.preset_idx else "  "
+            attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if i == self.preset_idx else curses.color_pair(COLOR_MENU)
+            try:
+                self.app.stdscr.attron(attr)
+                self.app.stdscr.addstr(y, box_x, f"║ {prefix}{name:<{box_w-7}} ║")
+                self.app.stdscr.attroff(attr)
+            except curses.error:
+                pass
+
+        bottom_y = box_y + 3 + len(FORMAT_PRESETS)
+        put(bottom_y, "╚" + "═" * (box_w - 2) + "╝")
+
+        self.draw_status("\u2191/\u2193 navigate  Enter select  Esc back")
 
     def handle_key(self, key):
         if self.loading:
@@ -908,6 +957,35 @@ class FormatSelector(Screen):
         if self.error:
             if key == 27:
                 self.app.pop_screen()
+            return
+        if self.preset_mode:
+            if key == 27:
+                self.preset_mode = False
+            elif key == curses.KEY_UP:
+                self.preset_idx = (self.preset_idx - 1) % len(FORMAT_PRESETS)
+            elif key == curses.KEY_DOWN:
+                self.preset_idx = (self.preset_idx + 1) % len(FORMAT_PRESETS)
+            elif key in (curses.KEY_ENTER, 10, 13):
+                name, fmt_str = FORMAT_PRESETS[self.preset_idx]
+                preset_fmt = {
+                    "id": fmt_str,
+                    "ext": "mp4",
+                    "res": name,
+                    "size": 0,
+                    "tbr": "?",
+                    "vcodec": "avc1",
+                    "acodec": "mp4a",
+                    "note": "Preset",
+                }
+                pl_name = self.playlist_title if self.playlist_videos else None
+                self.app.push_screen(
+                    FolderBrowser(self.app, self.url, preset_fmt,
+                                  self.video_info.get("title", ""),
+                                  playlist_name=pl_name,
+                                  playlist_videos=self.playlist_videos,
+                                  playlist_title=self.playlist_title,
+                                  mp3_mode=False)
+                )
             return
         if key == 27:
             self.app.pop_screen()
@@ -925,6 +1003,9 @@ class FormatSelector(Screen):
                               playlist_title=self.playlist_title,
                               mp3_mode=False)
             )
+        elif key == ord("p"):
+            self.preset_mode = True
+            self.preset_idx = 0
         elif key == ord("r"):
             self.loading = True
             self.error = ""
