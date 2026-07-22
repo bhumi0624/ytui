@@ -67,6 +67,8 @@ COLOR_NAMES = {
     5: "progress", 6: "header", 7: "info", 8: "error",
 }
 
+SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
 
 class ConfigManager:
     def __init__(self):
@@ -304,6 +306,23 @@ class Screen:
             except curses.error:
                 pass
 
+    def draw_scroll_indicators(self, offset, max_visible, total, y_top, x=2):
+        if offset > 0:
+            try:
+                self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
+                self.app.stdscr.addstr(y_top, x, f"▲ {offset} more above")
+                self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
+            except curses.error:
+                pass
+        bottom_remain = total - offset - max_visible
+        if bottom_remain > 0:
+            try:
+                self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
+                self.app.stdscr.addstr(y_top + max_visible - 1, x, f"▼ {bottom_remain} more below")
+                self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
+            except curses.error:
+                pass
+
 
 class MainMenu(Screen):
     def __init__(self, app):
@@ -492,7 +511,7 @@ class SearchInput(Screen):
 
         if self.mode == "loading":
             try:
-                msg = " Searching YouTube... "
+                msg = f" {SPINNER_FRAMES[self.app.spinner_count % 10]} Searching... "
                 self.app.stdscr.attron(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
                 self.app.stdscr.addstr(h // 2, w // 2 - len(msg) // 2, msg)
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
@@ -793,7 +812,7 @@ class FormatSelector(Screen):
 
         if self.loading:
             self.app.stdscr.attron(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
-            msg = " Fetching formats... "
+            msg = f" {SPINNER_FRAMES[self.app.spinner_count % 10]} Fetching formats... "
             self.app.stdscr.addstr(h // 2, w // 2 - len(msg) // 2, msg)
             self.app.stdscr.attroff(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
             self.draw_status("Loading...")
@@ -847,7 +866,13 @@ class FormatSelector(Screen):
             size_str = fmt_filesize(f["size"])
             audio_tag = "+a" if f.get("acodec", "") == "none" else ""
             line = f"{f['id']:>4}  {f['ext']:<6}  {f['res']:<10}  {size_str:<10}  {f['vcodec']:<8}  {f['acodec']:<8}  {audio_tag:<4}{f['note']}"
-            attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if (self.offset + i) == self.idx else curses.color_pair(COLOR_MENU)
+            is_sel = (self.offset + i) == self.idx
+            if is_sel:
+                attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE
+            elif i % 2 == 1:
+                attr = curses.color_pair(COLOR_MENU) | curses.A_DIM
+            else:
+                attr = curses.color_pair(COLOR_MENU)
             try:
                 self.app.stdscr.attron(attr)
                 self.app.stdscr.addstr(y, 0, line[: w - 1])
@@ -855,6 +880,7 @@ class FormatSelector(Screen):
             except curses.error:
                 pass
 
+        self.draw_scroll_indicators(self.offset, max_visible, len(self.formats), 4)
         footer = f"Showing {len(self.formats)} formats"
         self.draw_status(f"{footer}  ↑/↓ navigate  d download  Esc back")
 
@@ -983,6 +1009,8 @@ class FolderBrowser(Screen):
             if (self.offset + i) == self.idx:
                 prefix = " >"
                 attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE
+            elif i % 2 == 1:
+                attr = curses.color_pair(COLOR_MENU) | curses.A_DIM
             else:
                 attr = curses.color_pair(COLOR_MENU)
             try:
@@ -992,6 +1020,7 @@ class FolderBrowser(Screen):
             except curses.error:
                 pass
 
+        self.draw_scroll_indicators(self.offset, max_visible, len(self.entries), y_start)
         if self.new_folder_mode:
             try:
                 input_line = f" New folder: {self.new_folder_name}█"
@@ -1209,7 +1238,7 @@ class DownloadProgress(Screen):
 
         if self.status == "starting":
             try:
-                self.app.stdscr.addstr(y, 2, " Starting download...")
+                self.app.stdscr.addstr(y, 2, f" {SPINNER_FRAMES[self.app.spinner_count % 10]} Starting download...")
             except curses.error:
                 pass
             self.draw_status("Please wait...")
@@ -1247,12 +1276,14 @@ class DownloadProgress(Screen):
                     pass
 
         if pct is not None:
-            filled = int(bar_w * pct / 100)
-            bar = "█" * filled + "░" * (bar_w - filled)
-            pct_str = f"{pct:.1f}%"
+            if pct < 30:
+                bar_color = COLOR_ERROR
+            elif pct < 70:
+                bar_color = COLOR_SEL
+            else:
+                bar_color = COLOR_PROGRESS
         else:
-            bar = "░" * bar_w
-            pct_str = "?%"
+            bar_color = COLOR_MENU
 
         # Deteksi reset stream (auto-merge: video-only + audio)
         if pct is not None and self.last_pct_val > 50 and pct < 10:
@@ -1261,7 +1292,13 @@ class DownloadProgress(Screen):
             self.last_pct_val = pct
 
         try:
-            self.app.stdscr.addstr(y, 2, f" {pct_str}  [{bar}]")
+            filled = int(bar_w * pct / 100) if pct is not None else 0
+            bar = "█" * filled
+            pct_str = f"{pct:.1f}%" if pct is not None else "?%"
+            self.app.stdscr.attron(curses.color_pair(bar_color))
+            self.app.stdscr.addstr(y, 2, f" {pct_str}  [{bar}")
+            self.app.stdscr.attroff(curses.color_pair(bar_color))
+            self.app.stdscr.addstr(y, 2 + len(pct_str) + 4 + filled, f"{'░' * (bar_w - filled)}]")
             y += 1
             info_parts = []
             if self.downloaded and self.downloaded not in ("NA", "N/A", "0"):
@@ -1345,7 +1382,13 @@ class HistoryView(Screen):
             fmt_id = entry.get("format_id", "?")
             date = fmt_time(entry.get("timestamp", ""))
             line = f"{self.offset + i + 1:>3}  {title:<40}  {fmt_id:<6}  {date:<12}"
-            attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if (self.offset + i) == self.idx else curses.color_pair(COLOR_MENU)
+            is_sel = (self.offset + i) == self.idx
+            if is_sel:
+                attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE
+            elif i % 2 == 1:
+                attr = curses.color_pair(COLOR_MENU) | curses.A_DIM
+            else:
+                attr = curses.color_pair(COLOR_MENU)
             try:
                 self.app.stdscr.attron(attr)
                 self.app.stdscr.addstr(y, 0, line[: w - 1])
@@ -1353,6 +1396,7 @@ class HistoryView(Screen):
             except curses.error:
                 pass
 
+        self.draw_scroll_indicators(self.offset, max_visible, len(entries), 3)
         if self.msg:
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_ERROR))
@@ -1806,7 +1850,7 @@ class PlaylistDetect(Screen):
         self.draw_title("Checking URL...")
         if self.loading:
             try:
-                msg = " Fetching video info... "
+                msg = f" {SPINNER_FRAMES[self.app.spinner_count % 10]} Detecting playlist... "
                 self.app.stdscr.attron(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
                 self.app.stdscr.addstr(h // 2, w // 2 - len(msg) // 2, msg)
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
@@ -2057,7 +2101,13 @@ class PlaylistSelector(Screen):
             mins, secs = divmod(int(dur), 60)
             dur_str = f"{mins}:{secs:02d}" if dur else "?:??"
             line = f" {checkbox}  {title:<50}  {dur_str:<6}"
-            attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if (self.offset + i) == self.idx else curses.color_pair(COLOR_MENU)
+            is_sel = (self.offset + i) == self.idx
+            if is_sel:
+                attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE
+            elif i % 2 == 1:
+                attr = curses.color_pair(COLOR_MENU) | curses.A_DIM
+            else:
+                attr = curses.color_pair(COLOR_MENU)
             try:
                 self.app.stdscr.attron(attr)
                 self.app.stdscr.addstr(y, 0, line[:w-1])
@@ -2065,6 +2115,7 @@ class PlaylistSelector(Screen):
             except curses.error:
                 pass
 
+        self.draw_scroll_indicators(self.offset, max_visible, len(self.videos), 4)
         sel_count = sum(self.selected)
         try:
             status_info = f" {sel_count}/{len(self.videos)} selected"
@@ -2255,9 +2306,18 @@ class PlaylistProgress(Screen):
         bar_w = min(40, w - 10)
         overall_pct = (self.current / self.total * 100) if self.total > 0 else 0
         filled = int(bar_w * overall_pct / 100)
-        o_bar = "█" * filled + "░" * (bar_w - filled)
+        if overall_pct < 30:
+            o_bar_color = COLOR_ERROR
+        elif overall_pct < 70:
+            o_bar_color = COLOR_SEL
+        else:
+            o_bar_color = COLOR_PROGRESS
+        o_bar = "█" * filled
         try:
-            self.app.stdscr.addstr(3, 2, f" Playlist: {self.current}/{self.total}  [{o_bar}]  {overall_pct:.0f}%")
+            self.app.stdscr.attron(curses.color_pair(o_bar_color))
+            self.app.stdscr.addstr(3, 2, f" Playlist: {self.current}/{self.total}  [{o_bar}")
+            self.app.stdscr.attroff(curses.color_pair(o_bar_color))
+            self.app.stdscr.addstr(3, 2 + len(f" Playlist: {self.current}/{self.total}  [") + filled, f"{'░' * (bar_w - filled)}]  {overall_pct:.0f}%")
         except curses.error:
             pass
 
@@ -2284,9 +2344,18 @@ class PlaylistProgress(Screen):
 
             # Inner progress bar
             inner_filled = int(bar_w * self.current_percent / 100)
-            i_bar = "█" * inner_filled + "░" * (bar_w - inner_filled)
+            if self.current_percent < 30:
+                i_bar_color = COLOR_ERROR
+            elif self.current_percent < 70:
+                i_bar_color = COLOR_SEL
+            else:
+                i_bar_color = COLOR_PROGRESS
+            i_bar = "█" * inner_filled
             try:
-                self.app.stdscr.addstr(7, 2, f" [{i_bar}]  {self.current_percent:.1f}%")
+                self.app.stdscr.attron(curses.color_pair(i_bar_color))
+                self.app.stdscr.addstr(7, 2, f" [{i_bar}")
+                self.app.stdscr.attroff(curses.color_pair(i_bar_color))
+                self.app.stdscr.addstr(7, 2 + 1 + inner_filled, f"{'░' * (bar_w - inner_filled)}]  {self.current_percent:.1f}%")
             except curses.error:
                 pass
 
@@ -2530,6 +2599,7 @@ class App:
         self.screens = []
         self.running = True
         self.start_url = None
+        self.spinner_count = 0
         self._init_curses()
         self.push_screen(MainMenu(self))
         self._detect_clipboard()
@@ -2594,6 +2664,7 @@ class App:
                 screen = self.screens[-1]
                 screen.render()
                 self.stdscr.refresh()
+                self.spinner_count += 1
                 key = self.stdscr.getch()
                 if key != -1:  # -1 = timeout, tidak ada tombol ditekan
                     if key == ord("?"):
