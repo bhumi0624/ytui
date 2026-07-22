@@ -298,7 +298,7 @@ class Screen:
 
     def clear_content(self):
         h, w = self.app.stdscr.getmaxyx()
-        for y in range(1, h - 1):
+        for y in range(1, h - 3):
             try:
                 self.app.stdscr.addstr(y, 0, " " * (w - 1))
             except curses.error:
@@ -1708,7 +1708,7 @@ class BatchProgress(Screen):
                 self.app.stdscr.addstr(6 + i, 2, f" {icon} {url_short}")
                 self.app.stdscr.attroff(attr)
                 if r[0] == "fail" and len(r) > 2:
-                    self.app.stdscr.addstr(5 + i, w // 2, f" {r[2]}")
+                    self.app.stdscr.addstr(6 + i, w // 2, f" {r[2]}")
             except curses.error:
                 pass
 
