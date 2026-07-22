@@ -268,25 +268,31 @@ class Screen:
 
     def draw_status(self, text="", color=COLOR_STATUS):
         h, w = self.app.stdscr.getmaxyx()
-        bar = f" {text} ".ljust(w - 1) if text else " " * (w - 1)
+        sep_y = h - 3
+        try:
+            self.app.stdscr.attron(curses.color_pair(COLOR_HEADER))
+            self.app.stdscr.addstr(sep_y, 0, "─" * w)
+            self.app.stdscr.attroff(curses.color_pair(COLOR_HEADER))
+        except curses.error:
+            pass
         try:
             self.app.stdscr.attron(curses.color_pair(color))
-            self.app.stdscr.addstr(h - 1, 0, bar[: w - 1])
+            self.app.stdscr.addstr(sep_y + 1, 0, text[:w - 1])
             self.app.stdscr.attroff(curses.color_pair(color))
         except curses.error:
             pass
 
     def draw_title(self, text):
         h, w = self.app.stdscr.getmaxyx()
-        title = f" ytui - {text} "
-        bar = f" [q] Quit ".rjust(w - 1)
+        title = f" ytui v1.0: {text} "
+        pad = w - len(title) - 2
+        if pad < 0:
+            title = title[:w - 4]
+            pad = 0
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-            self.app.stdscr.addstr(0, 0, title[: w - 1])
+            self.app.stdscr.addstr(0, 0, f"┌{title}{'─' * pad}┐")
             self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-            self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-            self.app.stdscr.addstr(0, w - len(bar), bar)
-            self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
         except curses.error:
             pass
 
@@ -316,44 +322,51 @@ class MainMenu(Screen):
     def render(self):
         h, w = self.app.stdscr.getmaxyx()
         self.app.stdscr.clear()
-        self.draw_title("Main Menu")
 
-        start_y = h // 2 - len(self.items) // 2 - 2
-        title = "ytdl TUI"
-        try:
-            self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-            self.app.stdscr.addstr(start_y - 1, w // 2 - len(title) // 2, title)
-            self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-        except curses.error:
-            pass
+        box_w = 38
+        box_x = max(0, w // 2 - box_w // 2)
+        box_y = max(0, h // 2 - 6)
 
-        for i, (label, _) in enumerate(self.items):
-            y = start_y + i + 1
-            x = w // 2 - 20
-            prefix = "  "
-            if i == self.idx:
-                prefix = " >"
-                attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE
-            else:
-                attr = curses.color_pair(COLOR_MENU)
+        def put(y, s):
             try:
-                self.app.stdscr.attron(attr)
-                self.app.stdscr.addstr(y, x, f"{prefix} {label:<35}")
-                self.app.stdscr.attroff(attr)
+                self.app.stdscr.addstr(y, box_x, s[:box_w])
             except curses.error:
                 pass
 
-        # ── Theme toggle button ─────────────────────────────
-        btn_y = start_y + len(self.items) + 2
-        btn_width = 22
-        btn_x = w // 2 - btn_width // 2
-        theme = self.app.config['theme']
-        symbol = "●" if theme == "dark" else "○"
-        btn_text = f"{symbol}  Theme: {theme.capitalize()}"
-        self._theme_btn = self.draw_button(btn_y, btn_x, btn_text,
-                                           width=btn_width, selected=False, active=True)
+        # Top
+        self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+        put(box_y, "╔" + "═" * (box_w - 2) + "╗")
+        put(box_y + 1, f"║{'ytui v1.0':^{box_w-2}}║")
+        put(box_y + 2, f"║{'yt-dlp Terminal UI':^{box_w-2}}║")
+        self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
+        put(box_y + 3, "╠" + "═" * (box_w - 2) + "╣")
 
-        self.draw_status("↑/↓ navigate  Enter select  q quit  Click theme button above  Ctrl+T toggle")
+        # Menu items
+        for i, (label, _) in enumerate(self.items):
+            y = box_y + 4 + i
+            prefix = "▶" if i == self.idx else " "
+            attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if i == self.idx else curses.color_pair(COLOR_MENU)
+            self.app.stdscr.attron(attr)
+            put(y, f"║ {prefix} {label:<29} ║")
+            self.app.stdscr.attroff(attr)
+
+        # Separator before theme
+        item_end = box_y + 4 + len(self.items)
+        put(item_end, "╠" + "═" * (box_w - 2) + "╣")
+
+        # Theme inline
+        theme = self.app.config["theme"]
+        dot = "●" if theme == "dark" else "○"
+        btn_y = item_end + 1
+        self.app.stdscr.attron(curses.color_pair(COLOR_MENU))
+        put(btn_y, f"║   {dot} Theme: {theme.capitalize():<22} ║")
+        self.app.stdscr.attroff(curses.color_pair(COLOR_MENU))
+        self._theme_btn = (btn_y, box_x, box_w, 1)
+
+        # Bottom
+        put(btn_y + 1, "╚" + "═" * (box_w - 2) + "╝")
+
+        self.draw_status("↑/↓ navigate  Enter select  q quit  Ctrl+T toggle theme")
 
     def _handle_mouse_click(self):
         """Check if mouse click hit the theme button."""
@@ -810,7 +823,7 @@ class FormatSelector(Screen):
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
             info_line = f" {title[:w-4]}  ({dur_str})"
-            self.app.stdscr.addstr(1, 0, info_line[: w - 1])
+            self.app.stdscr.addstr(2, 0, info_line[: w - 1])
             self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
         except curses.error:
             pass
@@ -818,19 +831,19 @@ class FormatSelector(Screen):
         header = f"{'ID':>4}  {'EXT':<6}  {'RES':<10}  {'SIZE':<10}  {'VCODEC':<8}  {'ACODEC':<8}  {'':4}NOTE"
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
-            self.app.stdscr.addstr(2, 0, header[: w - 1])
+            self.app.stdscr.addstr(3, 0, header[: w - 1])
             self.app.stdscr.attroff(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
         except curses.error:
             pass
 
-        max_visible = h - 6
+        max_visible = h - 7
         if self.idx < self.offset:
             self.offset = self.idx
         if self.idx >= self.offset + max_visible:
             self.offset = self.idx - max_visible + 1
 
         for i, f in enumerate(self.formats[self.offset:self.offset + max_visible]):
-            y = 3 + i
+            y = 4 + i
             size_str = fmt_filesize(f["size"])
             audio_tag = "+a" if f.get("acodec", "") == "none" else ""
             line = f"{f['id']:>4}  {f['ext']:<6}  {f['res']:<10}  {size_str:<10}  {f['vcodec']:<8}  {f['acodec']:<8}  {audio_tag:<4}{f['note']}"
@@ -924,7 +937,7 @@ class FolderBrowser(Screen):
         path_display = self.current_path[: w - 4]
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-            self.app.stdscr.addstr(1, 0, f" {path_display}")
+            self.app.stdscr.addstr(2, 0, f" {path_display}")
             self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
         except curses.error:
             pass
@@ -933,7 +946,7 @@ class FolderBrowser(Screen):
             audio_tag = " +audio" if self.fmt.get("acodec", "") == "none" else ""
             preview = f"Format: {self.fmt['id']}{audio_tag}  |  {self.video_title[:35]}"
             self.app.stdscr.attron(curses.color_pair(COLOR_HEADER))
-            self.app.stdscr.addstr(2, 0, f" {preview[:w-3]}")
+            self.app.stdscr.addstr(3, 0, f" {preview[:w-3]}")
             self.app.stdscr.attroff(curses.color_pair(COLOR_HEADER))
         except curses.error:
             pass
@@ -948,11 +961,11 @@ class FolderBrowser(Screen):
             try:
                 pl_line = "  ".join(line3_parts)
                 self.app.stdscr.attron(curses.color_pair(COLOR_PROGRESS))
-                self.app.stdscr.addstr(3, 0, f" {pl_line[:w-3]}")
+                self.app.stdscr.addstr(4, 0, f" {pl_line[:w-3]}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_PROGRESS))
             except curses.error:
                 pass
-        y_start = 5 if line3_parts else 4
+        y_start = 6 if line3_parts else 5
 
         max_visible = h - y_start - 3
         if self.idx < self.offset:
@@ -983,7 +996,7 @@ class FolderBrowser(Screen):
             try:
                 input_line = f" New folder: {self.new_folder_name}█"
                 self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-                self.app.stdscr.addstr(h - 3, 2, input_line[: w - 4])
+                self.app.stdscr.addstr(h - 4, 2, input_line[: w - 4])
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
             except curses.error:
                 pass
@@ -991,7 +1004,7 @@ class FolderBrowser(Screen):
             try:
                 color = COLOR_INFO if "Created" in self.msg else COLOR_ERROR
                 self.app.stdscr.attron(curses.color_pair(color))
-                self.app.stdscr.addstr(h - 3, 2, f" {self.msg[:w-4]}")
+                self.app.stdscr.addstr(h - 4, 2, f" {self.msg[:w-4]}")
                 self.app.stdscr.attroff(curses.color_pair(color))
             except curses.error:
                 pass
@@ -1176,12 +1189,12 @@ class DownloadProgress(Screen):
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
             title = self.video_title[:w - 4]
-            self.app.stdscr.addstr(2, 2, title)
+            self.app.stdscr.addstr(3, 2, title)
             self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
         except curses.error:
             pass
 
-        y = 5
+        y = 6
         bar_w = min(50, w - 10)
 
         if self.status == "error":
@@ -1210,7 +1223,7 @@ class DownloadProgress(Screen):
                 self.app.stdscr.addstr(y + 2, 2, f" Saved to: {self.dest_dir}")
             except curses.error:
                 pass
-            self.app.stdscr.addstr(h - 3, 2, " Esc to go back")
+            self.app.stdscr.addstr(h - 4, 2, " Esc to go back")
             return
 
         # 1. Fragment-based (HLS priority)
@@ -1315,19 +1328,19 @@ class HistoryView(Screen):
         header = f"{'#':>3}  {'Title':<40}  {'Fmt':<6}  {'Date':<12}"
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
-            self.app.stdscr.addstr(1, 0, header[: w - 1])
+            self.app.stdscr.addstr(2, 0, header[: w - 1])
             self.app.stdscr.attroff(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
         except curses.error:
             pass
 
-        max_visible = h - 5
+        max_visible = h - 6
         if self.idx < self.offset:
             self.offset = self.idx
         if self.idx >= self.offset + max_visible:
             self.offset = self.idx - max_visible + 1
 
         for i, entry in enumerate(entries[self.offset:self.offset + max_visible]):
-            y = 2 + i
+            y = 3 + i
             title = entry.get("title", "?")[:38]
             fmt_id = entry.get("format_id", "?")
             date = fmt_time(entry.get("timestamp", ""))
@@ -1343,7 +1356,7 @@ class HistoryView(Screen):
         if self.msg:
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_ERROR))
-                self.app.stdscr.addstr(h - 3, 2, f" {self.msg[:w-4]}")
+                self.app.stdscr.addstr(h - 4, 2, f" {self.msg[:w-4]}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_ERROR))
             except curses.error:
                 pass
@@ -1403,17 +1416,17 @@ class BatchDownload(Screen):
             path_display = self.current_path[:w - 4]
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-                self.app.stdscr.addstr(1, 0, f" {path_display}")
+                self.app.stdscr.addstr(2, 0, f" {path_display}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
             except curses.error:
                 pass
-            max_visible = h - 5
+            max_visible = h - 6
             if self.dir_idx < self.offset:
                 self.offset = self.dir_idx
             if self.dir_idx >= self.offset + max_visible:
                 self.offset = self.dir_idx - max_visible + 1
             for i, entry in enumerate(self.entries[self.offset:self.offset + max_visible]):
-                y = 3 + i
+                y = 4 + i
                 display = entry if entry != ".." else "[..] Parent Directory"
                 attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if (self.offset + i) == self.dir_idx else curses.color_pair(COLOR_MENU)
                 try:
@@ -1427,7 +1440,7 @@ class BatchDownload(Screen):
         if self.msg:
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_ERROR))
-                self.app.stdscr.addstr(h - 3, 2, f" {self.msg[:w-4]}")
+                self.app.stdscr.addstr(h - 4, 2, f" {self.msg[:w-4]}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_ERROR))
             except curses.error:
                 pass
@@ -1518,21 +1531,21 @@ class BatchConfirm(Screen):
 
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
-            self.app.stdscr.addstr(1, 2, f" {len(self.urls)} URLs loaded from {os.path.basename(self.src_path)}")
+            self.app.stdscr.addstr(2, 2, f" {len(self.urls)} URLs loaded from {os.path.basename(self.src_path)}")
             self.app.stdscr.attroff(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
         except curses.error:
             pass
 
-        max_visible = h - 6
+        max_visible = h - 7
         for i, url in enumerate(self.urls[:max_visible]):
             try:
-                self.app.stdscr.addstr(3 + i, 2, f" {i + 1:>3}. {url[:w-10]}")
+                self.app.stdscr.addstr(4 + i, 2, f" {i + 1:>3}. {url[:w-10]}")
             except curses.error:
                 pass
 
         if len(self.urls) > max_visible:
             try:
-                self.app.stdscr.addstr(h - 4, 2, f" ... and {len(self.urls) - max_visible} more")
+                self.app.stdscr.addstr(h - 5, 2, f" ... and {len(self.urls) - max_visible} more")
             except curses.error:
                 pass
 
@@ -1603,7 +1616,7 @@ class BatchFormatPick(Screen):
             attr = curses.color_pair(COLOR_ERROR) if self.msg and i == len(lines) - 1 else curses.color_pair(COLOR_MENU)
             try:
                 self.app.stdscr.attron(attr)
-                self.app.stdscr.addstr(3 + i, 4, line[: w - 8])
+                self.app.stdscr.addstr(4 + i, 4, line[: w - 8])
                 self.app.stdscr.attroff(attr)
             except curses.error:
                 pass
@@ -1671,17 +1684,17 @@ class BatchProgress(Screen):
         self.draw_title("Batch Download Progress")
 
         try:
-            self.app.stdscr.addstr(2, 2, f" Progress: {self.current}/{self.total}")
+            self.app.stdscr.addstr(3, 2, f" Progress: {self.current}/{self.total}")
             if self.total > 0:
                 pct = int(self.current / self.total * 100)
                 bar_w = 40
                 filled = int(bar_w * pct / 100)
                 bar = "█" * filled + "░" * (bar_w - filled)
-                self.app.stdscr.addstr(3, 2, f" [{bar}] {pct}%")
+                self.app.stdscr.addstr(4, 2, f" [{bar}] {pct}%")
         except curses.error:
             pass
 
-        max_show = min(len(self.results), h - 8)
+        max_show = min(len(self.results), h - 9)
         for i, r in enumerate(self.results[:max_show]):
             url_short = r[1][:50]
             if r[0] == "ok":
@@ -1692,7 +1705,7 @@ class BatchProgress(Screen):
                 attr = curses.color_pair(COLOR_ERROR)
             try:
                 self.app.stdscr.attron(attr)
-                self.app.stdscr.addstr(5 + i, 2, f" {icon} {url_short}")
+                self.app.stdscr.addstr(6 + i, 2, f" {icon} {url_short}")
                 self.app.stdscr.attroff(attr)
                 if r[0] == "fail" and len(r) > 2:
                     self.app.stdscr.addstr(5 + i, w // 2, f" {r[2]}")
@@ -1705,7 +1718,7 @@ class BatchProgress(Screen):
             summary = f" Complete: {ok_count} OK, {fail_count} failed"
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-                self.app.stdscr.addstr(h - 4, 2, summary)
+                self.app.stdscr.addstr(h - 5, 2, summary)
                 self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
             except curses.error:
                 pass
@@ -1869,7 +1882,7 @@ class PlaylistOverview(Screen):
                 try:
                     attr = curses.color_pair(COLOR_TITLE) | curses.A_BOLD if i == 0 else curses.color_pair(COLOR_INFO)
                     self.app.stdscr.attron(attr)
-                    self.app.stdscr.addstr(2 + i, 0, line[:w-1])
+                    self.app.stdscr.addstr(3 + i, 0, line[:w-1])
                     self.app.stdscr.attroff(attr)
                 except curses.error:
                     pass
@@ -1879,12 +1892,12 @@ class PlaylistOverview(Screen):
         try:
             attr = curses.color_pair(COLOR_PROGRESS) if self.mp3_mode else curses.color_pair(COLOR_MENU)
             self.app.stdscr.attron(attr)
-            self.app.stdscr.addstr(5, 4, f" [M] {mp3_tag:<40}")
+            self.app.stdscr.addstr(6, 4, f" [M] {mp3_tag:<40}")
             self.app.stdscr.attroff(attr)
         except curses.error:
             pass
 
-        y_start = 7
+        y_start = 8
         for i, (label, _) in enumerate(self.options):
             y = y_start + i
             prefix = " >" if i == self.idx and not self.range_mode else "  "
@@ -2016,7 +2029,7 @@ class PlaylistSelector(Screen):
         pl_title = self.pl_data.get('title', 'Playlist')[:w-6]
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-            self.app.stdscr.addstr(1, 0, f" {pl_title}")
+            self.app.stdscr.addstr(2, 0, f" {pl_title}")
             self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
         except curses.error:
             pass
@@ -2024,19 +2037,19 @@ class PlaylistSelector(Screen):
         header = f" {'':3}  {'Title':<50}  {'Dur':<6}"
         try:
             self.app.stdscr.attron(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
-            self.app.stdscr.addstr(2, 0, header[:w-1])
+            self.app.stdscr.addstr(3, 0, header[:w-1])
             self.app.stdscr.attroff(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
         except curses.error:
             pass
 
-        max_visible = h - 6
+        max_visible = h - 7
         if self.idx < self.offset:
             self.offset = self.idx
         if self.idx >= self.offset + max_visible:
             self.offset = self.idx - max_visible + 1
 
         for i, v in enumerate(self.videos[self.offset:self.offset + max_visible]):
-            y = 3 + i
+            y = 4 + i
             sel = self.selected[self.offset + i]
             checkbox = "[x]" if sel else "[ ]"
             title = v.get('title', '?')[:48]
@@ -2056,7 +2069,7 @@ class PlaylistSelector(Screen):
         try:
             status_info = f" {sel_count}/{len(self.videos)} selected"
             self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-            self.app.stdscr.addstr(h - 3, 2, status_info[:w-4])
+            self.app.stdscr.addstr(h - 4, 2, status_info[:w-4])
             self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
         except curses.error:
             pass
@@ -2064,7 +2077,7 @@ class PlaylistSelector(Screen):
         if self.msg:
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_ERROR))
-                self.app.stdscr.addstr(h - 4, 2, f" {self.msg[:w-4]}")
+                self.app.stdscr.addstr(h - 5, 2, f" {self.msg[:w-4]}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_ERROR))
             except curses.error:
                 pass
@@ -2244,7 +2257,7 @@ class PlaylistProgress(Screen):
         filled = int(bar_w * overall_pct / 100)
         o_bar = "█" * filled + "░" * (bar_w - filled)
         try:
-            self.app.stdscr.addstr(2, 2, f" Playlist: {self.current}/{self.total}  [{o_bar}]  {overall_pct:.0f}%")
+            self.app.stdscr.addstr(3, 2, f" Playlist: {self.current}/{self.total}  [{o_bar}]  {overall_pct:.0f}%")
         except curses.error:
             pass
 
@@ -2253,7 +2266,7 @@ class PlaylistProgress(Screen):
         if pl_name:
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-                self.app.stdscr.addstr(3, 2, f" {pl_name}{mode_tag}")
+                self.app.stdscr.addstr(4, 2, f" {pl_name}{mode_tag}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
             except curses.error:
                 pass
@@ -2264,7 +2277,7 @@ class PlaylistProgress(Screen):
             title = v.get('title', '?')[:w-6]
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-                self.app.stdscr.addstr(5, 2, f" Now: {title}")
+                self.app.stdscr.addstr(6, 2, f" Now: {title}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
             except curses.error:
                 pass
@@ -2273,7 +2286,7 @@ class PlaylistProgress(Screen):
             inner_filled = int(bar_w * self.current_percent / 100)
             i_bar = "█" * inner_filled + "░" * (bar_w - inner_filled)
             try:
-                self.app.stdscr.addstr(6, 2, f" [{i_bar}]  {self.current_percent:.1f}%")
+                self.app.stdscr.addstr(7, 2, f" [{i_bar}]  {self.current_percent:.1f}%")
             except curses.error:
                 pass
 
@@ -2285,7 +2298,7 @@ class PlaylistProgress(Screen):
                 info.append(f"ETA: {self.current_eta.strip()}")
             if info:
                 try:
-                    self.app.stdscr.addstr(7, 2, " " + "  •  ".join(info))
+                    self.app.stdscr.addstr(8, 2, " " + "  •  ".join(info))
                 except curses.error:
                     pass
 
@@ -2297,13 +2310,13 @@ class PlaylistProgress(Screen):
             }.get(self.current_status, self.current_status)
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-                self.app.stdscr.addstr(8, 2, f" {status_label}")
+                self.app.stdscr.addstr(9, 2, f" {status_label}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
             except curses.error:
                 pass
 
         # Results
-        y = 10
+        y = 11
         ok_count = sum(1 for r in self.results if r[0] == "ok")
         fail_count = sum(1 for r in self.results if r[0] == "fail")
         for i, r in enumerate(self.results[-(h - y - 2):]):  # show latest results
@@ -2321,7 +2334,7 @@ class PlaylistProgress(Screen):
             summary = f" Complete: {ok_count} OK, {fail_count} failed"
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-                self.app.stdscr.addstr(h - 4, 2, summary[:w-4])
+                self.app.stdscr.addstr(h - 5, 2, summary[:w-4])
                 self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
             except curses.error:
                 pass
@@ -2375,7 +2388,7 @@ class SettingsView(Screen):
             attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if i == self.idx and not self.edit_mode else curses.color_pair(COLOR_MENU)
             try:
                 self.app.stdscr.attron(attr)
-                self.app.stdscr.addstr(3 + i * 2, 2, display[: w - 4])
+                self.app.stdscr.addstr(4 + i * 2, 2, display[: w - 4])
                 self.app.stdscr.attroff(attr)
             except curses.error:
                 pass
@@ -2383,7 +2396,7 @@ class SettingsView(Screen):
         if self.edit_mode:
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
-                self.app.stdscr.addstr(h - 4, 2, f" Edit: {self.edit_field} = {self.edit_value}█")
+                self.app.stdscr.addstr(h - 5, 2, f" Edit: {self.edit_field} = {self.edit_value}█")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
             except curses.error:
                 pass
@@ -2391,7 +2404,7 @@ class SettingsView(Screen):
         if self.success_msg:
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_PROGRESS))
-                self.app.stdscr.addstr(h - 5, 2, f" {self.success_msg}")
+                self.app.stdscr.addstr(h - 6, 2, f" {self.success_msg}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_PROGRESS))
             except curses.error:
                 pass
@@ -2485,12 +2498,12 @@ class HelpScreen(Screen):
                 break
             try:
                 self.app.stdscr.attron(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
-                self.app.stdscr.addstr(2, x, f" {title}")
+                self.app.stdscr.addstr(3, x, f" {title}")
                 self.app.stdscr.attroff(curses.color_pair(COLOR_TITLE) | curses.A_BOLD)
             except curses.error:
                 pass
             for i, (key, desc) in enumerate(items):
-                row = 4 + i * 2
+                row = 5 + i * 2
                 if row >= h - 2:
                     break
                 try:
