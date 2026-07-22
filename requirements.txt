@@ -1,0 +1,12 @@
+# ytui - YouTube Downloader TUI
+# 
+# Semua dependencies utama adalah Python standard library (curses, json, os, dll).
+# Satu-satunya dependency eksternal adalah yt-dlp (digunakan sebagai subprocess).
+#
+# Install di Termux:
+#   pkg install yt-dlp python
+#
+# Install di sistem lain (Linux/macOS):
+#   pip install -r requirements.txt
+
+yt-dlp>=2024.0.0

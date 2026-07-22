@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime
+*.part
+*.ytdl
+*.mp4
+*.m4a
+*.webm
+
+# Config (auto-generated)
+/config.json
+/history.json
+
+# OS
+.DS_Store
+Thumbs.db
