@@ -24,6 +24,7 @@ DEFAULT_CONFIG = {
     "last_dir": "/sdcard/Download",
     "default_format": "bv*[height<=1080]+ba/b[height<=1080]",
     "max_history": 100,
+    "theme": "dark",
 }
 
 COLOR_MENU = 1
@@ -34,6 +35,36 @@ COLOR_PROGRESS = 5
 COLOR_HEADER = 6
 COLOR_INFO = 7
 COLOR_ERROR = 8
+
+# ── Theme definitions ──────────────────────────────────────────
+THEME_DARK = {
+    "menu":      (curses.COLOR_WHITE, -1),
+    "title":     (curses.COLOR_CYAN, -1),
+    "sel":       (curses.COLOR_YELLOW, -1),
+    "status":    (curses.COLOR_BLACK, curses.COLOR_WHITE),
+    "progress":  (curses.COLOR_GREEN, -1),
+    "header":    (curses.COLOR_CYAN, -1),
+    "info":      (curses.COLOR_MAGENTA, -1),
+    "error":     (curses.COLOR_RED, -1),
+}
+
+THEME_LIGHT = {
+    "menu":      (curses.COLOR_BLACK, -1),
+    "title":     (curses.COLOR_BLUE, -1),
+    "sel":       (curses.COLOR_WHITE, curses.COLOR_BLUE),
+    "status":    (curses.COLOR_WHITE, curses.COLOR_BLUE),
+    "progress":  (curses.COLOR_GREEN, -1),
+    "header":    (curses.COLOR_BLUE, -1),
+    "info":      (curses.COLOR_MAGENTA, -1),
+    "error":     (curses.COLOR_RED, -1),
+}
+
+THEMES = {"dark": THEME_DARK, "light": THEME_LIGHT}
+
+COLOR_NAMES = {
+    1: "menu", 2: "title", 3: "sel", 4: "status",
+    5: "progress", 6: "header", 7: "info", 8: "error",
+}
 
 
 class ConfigManager:
@@ -201,6 +232,39 @@ class Screen:
     def handle_key(self, key):
         raise NotImplementedError
 
+    def handle_mouse(self):
+        """Handle mouse click. Override in subclass if needed."""
+        pass
+
+    def draw_button(self, y, x, text, width=20, selected=False, active=False):
+        """Draw a clickable button with box-drawing characters.
+        Returns (y, x, width, height=3) for hit-testing.
+        """
+        h, w = self.app.stdscr.getmaxyx()
+        if y < 0 or y + 2 >= h or x < 0 or x + width >= w:
+            return (y, x, width, 3)  # skip rendering if offscreen
+        attr_btn = curses.color_pair(COLOR_SEL) | (curses.A_REVERSE if selected else 0)
+        attr_frame = curses.color_pair(COLOR_MENU)
+        if active:
+            attr_btn |= curses.A_BOLD
+        try:
+            # Top border
+            self.app.stdscr.attron(attr_frame)
+            self.app.stdscr.addstr(y, x, "┌" + "─" * (width - 2) + "┐")
+            self.app.stdscr.attroff(attr_frame)
+            # Text line
+            padded = f" {text:^{width-4}} "
+            self.app.stdscr.attron(attr_btn)
+            self.app.stdscr.addstr(y + 1, x, "│" + padded[:width - 2] + "│")
+            self.app.stdscr.attroff(attr_btn)
+            # Bottom border
+            self.app.stdscr.attron(attr_frame)
+            self.app.stdscr.addstr(y + 2, x, "└" + "─" * (width - 2) + "┘")
+            self.app.stdscr.attroff(attr_frame)
+        except curses.error:
+            pass
+        return (y, x, width, 3)
+
     def draw_status(self, text="", color=COLOR_STATUS):
         h, w = self.app.stdscr.getmaxyx()
         bar = f" {text} ".ljust(w - 1) if text else " " * (w - 1)
@@ -238,6 +302,7 @@ class MainMenu(Screen):
     def __init__(self, app):
         super().__init__(app)
         self.items = [
+            ("Search YouTube", "search"),
             ("Download URL", "download_url"),
             ("Batch Download (from file)", "batch"),
             ("Download History", "history"),
@@ -245,6 +310,7 @@ class MainMenu(Screen):
             ("Exit", "exit"),
         ]
         self.idx = 0
+        self._theme_btn = None  # (y, x, w, h) for mouse hit-test
 
     def render(self):
         h, w = self.app.stdscr.getmaxyx()
@@ -276,10 +342,39 @@ class MainMenu(Screen):
             except curses.error:
                 pass
 
-        self.draw_status("↑/↓ navigate  Enter select  q quit")
+        # ── Theme toggle button ─────────────────────────────
+        btn_y = start_y + len(self.items) + 2
+        btn_width = 22
+        btn_x = w // 2 - btn_width // 2
+        theme = self.app.config['theme']
+        symbol = "●" if theme == "dark" else "○"
+        btn_text = f"{symbol}  Theme: {theme.capitalize()}"
+        self._theme_btn = self.draw_button(btn_y, btn_x, btn_text,
+                                           width=btn_width, selected=False, active=True)
+
+        self.draw_status("↑/↓ navigate  Enter select  q quit  Click theme button above  Ctrl+T toggle")
+
+    def _handle_mouse_click(self):
+        """Check if mouse click hit the theme button."""
+        try:
+            _, mx, my, _, bstate = curses.getmouse()
+            if bstate & (curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED):
+                if self._theme_btn:
+                    btn_y, btn_x, btn_w, btn_h = self._theme_btn
+                    if btn_y <= my <= btn_y + btn_h - 1 and btn_x <= mx <= btn_x + btn_w:
+                        self.app.toggle_theme()
+        except curses.error:
+            pass
+
+    def handle_mouse(self):
+        self._handle_mouse_click()
 
     def handle_key(self, key):
-        if key in (ord("q"), 27):
+        if key == curses.KEY_MOUSE:
+            self._handle_mouse_click()
+        elif key == 20:  # Ctrl+T — toggle theme
+            self.app.toggle_theme()
+        elif key in (ord("q"), 27):
             self.app.running = False
         elif key == curses.KEY_UP:
             self.idx = (self.idx - 1) % len(self.items)
@@ -287,7 +382,9 @@ class MainMenu(Screen):
             self.idx = (self.idx + 1) % len(self.items)
         elif key in (curses.KEY_ENTER, 10, 13):
             action = self.items[self.idx][1]
-            if action == "download_url":
+            if action == "search":
+                self.app.push_screen(SearchInput(self.app))
+            elif action == "download_url":
                 self.app.push_screen(URLInput(self.app))
             elif action == "batch":
                 self.app.push_screen(BatchDownload(self.app))
@@ -349,6 +446,225 @@ class URLInput(Screen):
         elif 32 <= key < 127:
             self.url += chr(key)
             self.msg = ""
+
+
+class SearchInput(Screen):
+    """Search YouTube videos via yt-dlp ytsearch: and pick from results."""
+    def __init__(self, app):
+        super().__init__(app)
+        self.query = ""
+        self.results = []
+        self.idx = 0
+        self.offset = 0
+        self.mode = "input"  # "input" | "loading" | "results"
+        self.error = ""
+        self.msg = ""
+
+    def render(self):
+        h, w = self.app.stdscr.getmaxyx()
+        self.app.stdscr.clear()
+        self.draw_title("Search YouTube")
+
+        if self.mode == "loading":
+            try:
+                msg = " Searching YouTube... "
+                self.app.stdscr.attron(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
+                self.app.stdscr.addstr(h // 2, w // 2 - len(msg) // 2, msg)
+                self.app.stdscr.attroff(curses.color_pair(COLOR_INFO) | curses.A_BOLD)
+            except curses.error:
+                pass
+            self.draw_status("Searching...  Esc cancel")
+            return
+
+        if self.mode == "results":
+            self._render_results(h, w)
+            return
+
+        # mode == "input"
+        lines = [
+            "Search for videos on YouTube. Results are fetched via yt-dlp.",
+            "",
+            "Search: " + self.query + ("█" if len(self.query) < w - 10 else ""),
+        ]
+        if self.msg:
+            lines.append("")
+            lines.append(self.msg)
+
+        for i, line in enumerate(lines):
+            try:
+                attr = curses.color_pair(COLOR_ERROR) if self.msg and i == len(lines) - 1 else curses.color_pair(COLOR_MENU)
+                self.app.stdscr.attron(attr)
+                self.app.stdscr.addstr(h // 2 - 2 + i, 4, line[: w - 8])
+                self.app.stdscr.attroff(attr)
+            except curses.error:
+                pass
+
+        self.draw_status("Enter search  Esc back  Ctrl+U clear")
+
+    def _render_results(self, h, w):
+        try:
+            self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
+            self.app.stdscr.addstr(1, 0, f" Results for: {self.query[:w-16]}")
+            self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
+        except curses.error:
+            pass
+
+        header = f"{'':4}{'Title':<50}  {'Channel':<20}  {'Dur':6}"
+        try:
+            self.app.stdscr.attron(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
+            self.app.stdscr.addstr(2, 0, header[:w - 1])
+            self.app.stdscr.attroff(curses.color_pair(COLOR_HEADER) | curses.A_BOLD)
+        except curses.error:
+            pass
+
+        max_visible = h - 6
+        if self.idx < self.offset:
+            self.offset = self.idx
+        if self.idx >= self.offset + max_visible:
+            self.offset = self.idx - max_visible + 1
+
+        for i, r in enumerate(self.results[self.offset:self.offset + max_visible]):
+            y = 3 + i
+            num = f"{self.offset + i + 1:>3}."
+            title = r.get('title', '?')[:48]
+            channel = r.get('channel', '?')[:18]
+            dur = r.get('duration', 0)
+            mins, secs = divmod(int(dur), 60)
+            hours, mins = divmod(mins, 60)
+            dur_str = f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins}:{secs:02d}" if dur else "?:??"
+            line = f" {num} {title:<50}  {channel:<20}  {dur_str:>6}"
+            attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if (self.offset + i) == self.idx else curses.color_pair(COLOR_MENU)
+            try:
+                self.app.stdscr.attron(attr)
+                self.app.stdscr.addstr(y, 0, line[:w - 1])
+                self.app.stdscr.attroff(attr)
+            except curses.error:
+                pass
+
+        # Stats
+        stats = f" {len(self.results)} results  showing {self.offset + 1}-{min(self.offset + max_visible, len(self.results))}"
+        try:
+            self.app.stdscr.attron(curses.color_pair(COLOR_INFO))
+            self.app.stdscr.addstr(h - 3, 2, stats[:w - 4])
+            self.app.stdscr.attroff(curses.color_pair(COLOR_INFO))
+        except curses.error:
+            pass
+
+        if self.error:
+            try:
+                self.app.stdscr.attron(curses.color_pair(COLOR_ERROR))
+                self.app.stdscr.addstr(h - 4, 2, f" {self.error[:w-4]}")
+                self.app.stdscr.attroff(curses.color_pair(COLOR_ERROR))
+            except curses.error:
+                pass
+
+        self.draw_status("↑/↓ navigate  Enter select  Esc back  n new search")
+
+    def handle_key(self, key):
+        if self.mode == "loading":
+            if key == 27:
+                self.mode = "input"
+                self.msg = "Search cancelled"
+            return
+
+        if self.mode == "results":
+            self._handle_results_key(key)
+            return
+
+        # mode == "input"
+        if key == 27:
+            self.app.pop_screen()
+        elif key == 21:  # Ctrl+U
+            self.query = ""
+            self.msg = ""
+        elif key in (curses.KEY_ENTER, 10, 13):
+            if self.query.strip():
+                self._do_search()
+            else:
+                self.msg = "Query cannot be empty!"
+        elif key == curses.KEY_BACKSPACE or key == 127:
+            self.query = self.query[:-1]
+            self.msg = ""
+        elif 32 <= key < 127:
+            self.query += chr(key)
+            self.msg = ""
+
+    def _handle_results_key(self, key):
+        if key == 27:
+            self.mode = "input"
+            self.msg = ""
+            self.query = ""
+        elif key in (ord("n"), ord("N")):
+            self.mode = "input"
+            self.query = ""
+            self.results = []
+            self.msg = ""
+        elif key == curses.KEY_UP:
+            self.idx = max(0, self.idx - 1)
+        elif key == curses.KEY_DOWN:
+            self.idx = min(len(self.results) - 1, self.idx + 1)
+        elif key in (curses.KEY_ENTER, 10, 13):
+            if self.results:
+                selected = self.results[self.idx]
+                url = selected.get('url', '')
+                if url:
+                    self.app.push_screen(FormatSelector(self.app, url))
+
+    def _do_search(self):
+        self.mode = "loading"
+        self.error = ""
+        self.results = []
+        self.idx = 0
+        self.offset = 0
+
+        def run():
+            try:
+                # Escape special regex chars in query — ytsearch handles plain text
+                search_q = self.query.strip()
+                result = subprocess.run(
+                    ["yt-dlp", "--flat-playlist", "--dump-json",
+                     f"ytsearch15:{search_q}"],
+                    capture_output=True, text=True, timeout=30
+                )
+                if result.returncode != 0:
+                    self.error = result.stderr.strip()[:100]
+                    self.mode = "input"
+                    return
+                lines = [l for l in result.stdout.strip().split('\n') if l]
+                for line in lines:
+                    try:
+                        d = json.loads(line)
+                        vid_url = d.get('original_url') or d.get('webpage_url') or \
+                                   f"https://youtube.com/watch?v={d.get('id', '')}"
+                        ch = d.get('channel') or d.get('uploader') or d.get('channel_url') or '?'
+                        if ch and ch.startswith('http'):
+                            ch = '?'
+                        self.results.append({
+                            'id': d.get('id', ''),
+                            'title': d.get('title', '?'),
+                            'url': vid_url,
+                            'channel': ch[:30],
+                            'duration': d.get('duration', 0),
+                            'views': d.get('view_count', 0),
+                        })
+                    except json.JSONDecodeError:
+                        continue
+                if not self.results:
+                    self.error = "No results found"
+                    self.mode = "input"
+                else:
+                    self.mode = "results"
+            except subprocess.TimeoutExpired:
+                self.error = "Search timed out after 30s"
+                self.mode = "input"
+            except FileNotFoundError:
+                self.error = "yt-dlp not found! Install with: pkg install yt-dlp"
+                self.mode = "input"
+            except Exception as e:
+                self.error = str(e)[:100]
+                self.mode = "input"
+
+        threading.Thread(target=run, daemon=True).start()
 
 
 class FormatSelector(Screen):
@@ -2009,6 +2325,7 @@ class SettingsView(Screen):
             ("last_dir", "Default Download Directory", "path"),
             ("default_format", "Default Format String", "text"),
             ("max_history", "Max History Entries", "int"),
+            ("theme", "Color Theme", "choice", ["dark", "light"]),
         ]
         self.idx = 0
         self.edit_mode = False
@@ -2022,9 +2339,16 @@ class SettingsView(Screen):
         self.app.stdscr.clear()
         self.draw_title("Settings")
 
-        for i, (key, label, _) in enumerate(self.fields):
+        for i, field in enumerate(self.fields):
+            key, label = field[0], field[1]
+            ftype = field[2] if len(field) > 2 else "text"
             val = str(self.app.config[key])
-            display = f" {label:<35} {val:<40}"
+            if ftype == "choice":
+                choices = field[3] if len(field) > 3 else []
+                # Show with < > brackets for toggle indicator
+                display = f" {label:<35}  <{val:^8}>  [Enter to toggle]"
+            else:
+                display = f" {label:<35} {val:<40}"
             attr = curses.color_pair(COLOR_SEL) | curses.A_REVERSE if i == self.idx and not self.edit_mode else curses.color_pair(COLOR_MENU)
             try:
                 self.app.stdscr.attron(attr)
@@ -2049,7 +2373,7 @@ class SettingsView(Screen):
             except curses.error:
                 pass
 
-        status = "Editing..." if self.edit_mode else "↑/↓ navigate  Enter edit  Esc back"
+        status = "Editing..." if self.edit_mode else "↑/↓ navigate  Enter edit  Enter=toggle on choice  Ctrl+T quick toggle  Esc back"
         self.draw_status(status)
 
     def handle_key(self, key):
@@ -2090,9 +2414,15 @@ class SettingsView(Screen):
             self.idx = (self.idx + 1) % len(self.fields)
         elif key in (curses.KEY_ENTER, 10, 13):
             key_name = self.fields[self.idx][0]
-            self.edit_field = self.fields[self.idx][1]
-            self.edit_value = str(self.app.config[key_name])
-            self.edit_mode = True
+            ftype = self.fields[self.idx][2] if len(self.fields[self.idx]) > 2 else "text"
+            if ftype == "choice":
+                # Toggle theme directly
+                self.app.toggle_theme()
+                self.success_msg = f" ✓ Theme: {self.app.config['theme']}"
+            else:
+                self.edit_field = self.fields[self.idx][1]
+                self.edit_value = str(self.app.config[key_name])
+                self.edit_mode = True
 
 
 class App:
@@ -2107,16 +2437,36 @@ class App:
 
     def _init_curses(self):
         curses.use_default_colors()
-        for pair in range(1, 9):
-            curses.init_pair(pair, -1, -1)
-        curses.init_pair(COLOR_MENU, curses.COLOR_WHITE, -1)
-        curses.init_pair(COLOR_TITLE, curses.COLOR_CYAN, -1)
-        curses.init_pair(COLOR_SEL, curses.COLOR_YELLOW, -1)
-        curses.init_pair(COLOR_STATUS, curses.COLOR_BLACK, curses.COLOR_WHITE)
-        curses.init_pair(COLOR_PROGRESS, curses.COLOR_GREEN, -1)
-        curses.init_pair(COLOR_HEADER, curses.COLOR_CYAN, -1)
-        curses.init_pair(COLOR_INFO, curses.COLOR_MAGENTA, -1)
-        curses.init_pair(COLOR_ERROR, curses.COLOR_RED, -1)
+        # Enable mouse tracking for clickable UI elements
+        try:
+            curses.mousemask(curses.BUTTON1_CLICKED | curses.BUTTON1_RELEASED)
+        except curses.error:
+            pass  # Terminal may not support mouse
+        self.apply_theme(self.config["theme"])
+
+    def apply_theme(self, theme_name="dark"):
+        """Apply a named theme by re-initializing color pairs."""
+        theme = THEMES.get(theme_name, THEME_DARK)
+        for pair_num, color_key in COLOR_NAMES.items():
+            fg, bg = theme.get(color_key, (curses.COLOR_WHITE, -1))
+            try:
+                curses.init_pair(pair_num, fg, bg)
+            except curses.error:
+                pass
+        # Redraw current screen on next frame
+        if self.screens:
+            try:
+                self.stdscr.clear()
+                self.stdscr.refresh()
+            except curses.error:
+                pass
+
+    def toggle_theme(self):
+        """Switch between dark and light themes."""
+        current = self.config["theme"]
+        new_theme = "light" if current == "dark" else "dark"
+        self.config["theme"] = new_theme
+        self.apply_theme(new_theme)
 
     def push_screen(self, screen):
         self.screens.append(screen)
@@ -2136,7 +2486,10 @@ class App:
                 self.stdscr.refresh()
                 key = self.stdscr.getch()
                 if key != -1:  # -1 = timeout, tidak ada tombol ditekan
-                    screen.handle_key(key)
+                    if key == curses.KEY_MOUSE:
+                        screen.handle_mouse()
+                    else:
+                        screen.handle_key(key)
             except KeyboardInterrupt:
                 self.running = False
             except curses.error:
@@ -2144,6 +2497,12 @@ class App:
 
 
 def main():
+    import shutil
+    import sys
+    if not shutil.which("yt-dlp"):
+        print("ERROR: yt-dlp not found. Install it with:")
+        print("  pip install yt-dlp")
+        sys.exit(1)
     try:
         curses.wrapper(lambda stdscr: App(stdscr).run())
     except KeyboardInterrupt:
