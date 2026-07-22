@@ -23,41 +23,31 @@
 
 ## 📦 Installation
 
+### One-liner (Linux / macOS / Termux)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/bhumi0624/ytui/main/install.sh | bash
+```
+
+This installs yt-dlp, downloads YTUI, and sets up the `ytui` command automatically.
+
+### Windows
+
+```bash
+pipx install ytui
+```
+
+Or install manually:
+
+```bash
+pip install ytui
+python -m ytui
+```
+
 ### Prerequisites
 
 - Python 3.8+
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-
-### Install
-
-```bash
-# 1. Clone the repo
-git clone https://github.com/bhumi0624/ytui.git
-cd ytui
-
-# 2. Install Python dependencies
-pip install -r requirements.txt
-
-# 3. Run it!
-python3 ytui.py
-```
-
-### Termux (Android)
-
-```bash
-pkg update && pkg install python yt-dlp git
-git clone https://github.com/bhumi0624/ytui.git
-cd ytui
-python3 ytui.py
-```
-
-### Alias (optional)
-
-Add to your `~/.zshrc` or `~/.bashrc`:
-
-```bash
-alias ytui='python3 ~/dev/video-downloader/ytui/ytui.py'
-```
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) (installed automatically by the one-liner)
 
 ---
 
@@ -92,9 +82,11 @@ Main Menu
 
 ```
 ytui/
-├── ytui.py              # Main application (single file)
-├── requirements.txt     # Python dependencies
-└── README.md            # This file
+├── install.sh            # One-liner installer
+├── pyproject.toml        # Python packaging
+├── ytui.py               # Main application (single file)
+├── requirements.txt      # Python dependencies
+└── README.md             # This file
 ```
 
 Runtime config is stored at `~/.config/ytui/`:
