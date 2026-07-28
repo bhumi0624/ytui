@@ -21,3 +21,7 @@ Thumbs.db
 # Auto-generated
 *.egg-info/
 .superpowers/
+
+# Logs
+*.log
+/tmp/

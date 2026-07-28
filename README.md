@@ -74,7 +74,12 @@ Main Menu
 | `Space` | Toggle select (playlist selector) |
 | `a` / `n` | Select all / none (playlist selector) |
 | `n` | Create new folder (folder browser) |
+| `Ctrl+V` | Paste URL from clipboard (recommended over long-press paste) |
+| `Ctrl+U` | Clear input field |
 | `q` | Quit / Cancel download |
+| `?` | Show help (at main menu) |
+
+> **Note:** Use `Ctrl+V` to paste URLs instead of long-press paste. Long-press paste can drop special characters like `?` in some terminal emulators. `Ctrl+V` reads the clipboard directly via Android API (requires `termux-api` on Termux).
 
 ---
 

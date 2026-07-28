@@ -17,6 +17,16 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Debug log
+_DEBUG_LOG = Path("/tmp/ytui_debug.log")
+
+def debug_log(msg):
+    try:
+        with open(_DEBUG_LOG, "a") as f:
+            f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
 CONFIG_DIR = Path.home() / ".config" / "ytui"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 HISTORY_FILE = CONFIG_DIR / "history.json"
@@ -236,6 +246,19 @@ def sanitize_filename(name, max_len=80):
     return clean
 
 
+def normalize_url(url):
+    """Konversi YouTube Music URL (music.youtube.com) ke www.youtube.com biasa."""
+    if not url:
+        return url
+    # music.youtube.com/watch?v=XXX → www.youtube.com/watch?v=XXX
+    # music.youtube.com/playlist?list=XXX → www.youtube.com/playlist?list=XXX
+    url = url.replace("music.youtube.com", "www.youtube.com")
+    # Juga handle youtube.com tanpa www
+    if "://youtube.com/" in url:
+        url = url.replace("://youtube.com/", "://www.youtube.com/")
+    return url
+
+
 def fmt_time(ts_str):
     try:
         dt = datetime.fromisoformat(ts_str)
@@ -391,7 +414,9 @@ class MainMenu(Screen):
         self.draw_status("\u2191/\u2193 navigate  Enter select  q quit  t toggle theme")
 
     def handle_key(self, key):
-        if key == ord("t"):
+        if key == ord("?"):
+            self.app.push_screen(HelpScreen(self.app))
+        elif key == ord("t"):
             self.app.toggle_theme()
         elif key in (ord("q"), 27):
             self.app.running = False
@@ -432,7 +457,7 @@ class URLInput(Screen):
             return
 
         lines = [
-            "Paste or type a video/playlist URL below, then press Enter.",
+            "Paste URL below with Ctrl+V (long-press paste may drop some characters).",
             "",
             "URL: " + self.url + ("█" if len(self.url) < w - 10 else ""),
         ]
@@ -445,7 +470,7 @@ class URLInput(Screen):
             except curses.error:
                 pass
 
-        self.draw_status("Enter confirm  Esc back  Ctrl+U clear")
+        self.draw_status("Enter confirm  Esc back  Ctrl+V paste  Ctrl+U clear")
 
     def handle_key(self, key):
         if key == 27:
@@ -455,7 +480,9 @@ class URLInput(Screen):
         elif key in (curses.KEY_ENTER, 10, 13):
             if self.url.strip():
                 # Route ke PlaylistDetect yang akan auto-detect playlist vs single
-                self.app.push_screen(PlaylistDetect(self.app, self.url.strip()))
+                url = normalize_url(self.url.strip())
+                debug_log(f"URLInput Enter: {self.url.strip()!r} -> {url!r}")
+                self.app.push_screen(PlaylistDetect(self.app, url))
             else:
                 self.msg = "URL cannot be empty!"
         elif key == curses.KEY_BACKSPACE or key == 127:
@@ -727,9 +754,12 @@ class FormatSelector(Screen):
     def _fetch(self):
         def run():
             try:
+                # Safety: normalize URL before passing to yt-dlp
+                safe_url = normalize_url(self.url)
+                debug_log(f"FormatSelector._fetch URL: {self.url!r} -> safe: {safe_url!r}")
                 result = subprocess.run(
-                    ["yt-dlp", "--dump-json", self.url],
-                    capture_output=True, text=True, timeout=30
+                    ["yt-dlp", "--dump-json", safe_url],
+                    capture_output=True, text=True, timeout=60
                 )
                 if result.returncode != 0:
                     self.error = result.stderr.strip() or f"yt-dlp exited with code {result.returncode}"
@@ -1303,7 +1333,7 @@ class FolderBrowser(Screen):
 class DownloadProgress(Screen):
     def __init__(self, app, url, fmt, video_title, dest_dir, subtitle_langs=""):
         super().__init__(app)
-        self.url = url
+        self.url = normalize_url(url)
         self.fmt = fmt
         self.video_title = video_title
         self.dest_dir = dest_dir
@@ -1744,7 +1774,7 @@ class BatchDownload(Screen):
     def _load_urls(self, fpath):
         try:
             with open(fpath) as f:
-                urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+                urls = [normalize_url(line.strip()) for line in f if line.strip() and not line.startswith("#")]
             if not urls:
                 self.msg = "No valid URLs found in file"
                 return
@@ -1900,6 +1930,7 @@ class BatchProgress(Screen):
                 if not self.running:
                     break
                 self.current = i
+                url = normalize_url(url)  # safety normalize
                 try:
                     result = subprocess.run(
                         ["yt-dlp", "-f", self.fmt_id, "--newline",
@@ -2001,9 +2032,12 @@ class PlaylistDetect(Screen):
     def _check(self):
         def run():
             try:
+                # Safety: normalize URL again before passing to yt-dlp
+                safe_url = normalize_url(self.url)
+                debug_log(f"PlaylistDetect._check URL: {self.url!r} -> safe: {safe_url!r}")
                 result = subprocess.run(
-                    ["yt-dlp", "--flat-playlist", "--dump-json", self.url],
-                    capture_output=True, text=True, timeout=30
+                    ["yt-dlp", "--flat-playlist", "--dump-json", safe_url],
+                    capture_output=True, text=True, timeout=60
                 )
                 if result.returncode != 0:
                     self.error = result.stderr.strip()[:100]
@@ -2023,6 +2057,7 @@ class PlaylistDetect(Screen):
                         d = json.loads(line)
                         vid_url = d.get('original_url') or d.get('webpage_url') or \
                                    f"https://youtube.com/watch?v={d.get('id', '')}"
+                        vid_url = normalize_url(vid_url)
                         videos.append({
                             'id': d.get('id', ''),
                             'title': d.get('title', '?'),
@@ -2413,6 +2448,7 @@ class PlaylistProgress(Screen):
         self._download_one(url)
 
     def _download_one(self, url):
+        url = normalize_url(url)
         def run():
             try:
                 tmpl = "ytui:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s|%(progress._total_bytes_str)s|%(progress.downloaded_bytes)s|%(progress.fragment_index)s|%(progress.fragment_count)s"
@@ -2817,7 +2853,7 @@ class App:
         try:
             content = subprocess.check_output([clipboard], timeout=2).decode().strip()
             if content and ("youtube.com" in content or "youtu.be" in content):
-                self.start_url = content
+                self.start_url = normalize_url(content)
         except Exception:
             pass
 
@@ -2873,9 +2909,7 @@ class App:
                 self.spinner_count += 1
                 key = self.stdscr.getch()
                 if key != -1:  # -1 = timeout, tidak ada tombol ditekan
-                    if key == ord("?"):
-                        self.push_screen(HelpScreen(self))
-                    elif key == curses.KEY_MOUSE:
+                    if key == curses.KEY_MOUSE:
                         screen.handle_mouse()
                     else:
                         screen.handle_key(key)
